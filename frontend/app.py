@@ -1,5 +1,6 @@
 """Streamlit 前端：僅以 HTTP 呼叫後端，不直接讀取資料庫與金鑰。"""
 import os
+from uuid import uuid4
 from datetime import date
 
 import httpx
@@ -12,6 +13,8 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 st.set_page_config(page_title="TravelMate AI", page_icon="🧭", layout="wide")
 st.title("🧭 TravelMate AI｜旅遊、住宿與消費決策助理")
 st.caption("示範資料與估算工具，並非即時訂房或保證報價。")
+if "rag_session_id" not in st.session_state:
+    st.session_state["rag_session_id"] = str(uuid4())
 
 
 def api_url():
@@ -57,7 +60,8 @@ with tab_plan:
     if submitted:
         result = request("POST", "/api/plan", json={"destination": destination,
             "start_date": start_date.isoformat(), "days": days, "people": people,
-            "budget_twd": budget, "preference": preference, "use_live_api": live})
+            "budget_twd": budget, "preference": preference, "use_live_api": live,
+            "session_id": st.session_state["rag_session_id"]})
         if result:
             st.session_state["plan_result"] = result
     if "plan_result" in st.session_state:
@@ -107,7 +111,9 @@ with tab_knowledge:
         if file.size > 5 * 1024 * 1024:
             st.error("檔案不可超過 5 MB")
         else:
-            response = request("POST", "/api/knowledge", files={"file": (file.name, file.getvalue(), file.type)})
+            response = request("POST", "/api/knowledge",
+                data={"session_id": st.session_state["rag_session_id"]},
+                files={"file": (file.name, file.getvalue(), file.type)})
             if response:
                 st.success(response["message"] + f"（{response['chunks']} 個片段）")
 

@@ -29,7 +29,7 @@ def plan(request: dict) -> dict:
                           "cost_twd_per_person": spot["cost_twd"] if spot else 0})
     costs = [day["cost_twd_per_person"] for day in itinerary]
     spending = budget_tool(days, people, chosen["price"] if chosen else 0, costs, budget)
-    notes = rag_tool(destination + " " + request["preference"])
+    notes = rag_tool(destination + " " + request["preference"], request.get("session_id"))
     # 天氣與匯率為可選外部呼叫；失敗要明示，不影響核心規劃。
     external = {}
     if request.get("use_live_api", False):

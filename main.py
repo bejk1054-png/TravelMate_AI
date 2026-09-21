@@ -1,12 +1,14 @@
 """FastAPI 入口：API → 主 Agent → Service / Tools → 資料層。"""
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from uuid import UUID
 
 from agents.travel_agent import plan
 from api.schemas import PlanRequest, PredictRequest
 from database.repository import recent_plans, save_plan
 from models.price_model import predict
-from rag.knowledge import extract, knowledge
+from rag.knowledge import extract, session_knowledge
 from services.analytics import summary
+from utils.config import secret
 
 app = FastAPI(title="TravelMate AI", version="1.0.0")
 
@@ -38,18 +40,24 @@ def price_prediction(body: PredictRequest):
 
 @app.get("/api/plans")
 def plans():
+    # 公開 API 不可列出其他訪客的行程；本機教學可自行啟用。
+    if secret("ENABLE_HISTORY_API") != "1":
+        raise HTTPException(status_code=403, detail="行程歷史 API 預設關閉")
     return recent_plans()
 
 
 @app.post("/api/knowledge")
-async def upload_knowledge(file: UploadFile = File(...)):
+async def upload_knowledge(file: UploadFile = File(...), session_id: UUID = Form(...)):
     # 限制傳輸大小並避免顯示伺服器路徑；公開展示站不建議開放任意上傳。
     if file.content_type not in ("text/plain", "text/csv", "application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="不支援的檔案類型")
     try:
         content = await file.read(5 * 1024 * 1024 + 1)
         text = extract(file.filename or "", content)
-        count = knowledge.add((file.filename or "筆記").split("/")[-1].split("\\")[-1], text)
+        base = session_knowledge(str(session_id))
+        if len(base.documents) >= 220:
+            raise ValueError("此工作階段的知識庫已達上限，請重新整理頁面")
+        count = base.add((file.filename or "筆記").split("/")[-1].split("\\")[-1], text)
     except (ValueError, UnicodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:

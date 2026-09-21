@@ -5,7 +5,9 @@ TF-IDF 是本機可執行的 embedding 基線；正式語意檢索可替換為�
 import csv
 import io
 import re
+from functools import lru_cache
 from pathlib import Path
+from uuid import UUID
 
 from pypdf import PdfReader
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -72,3 +74,15 @@ class KnowledgeBase:
 
 
 knowledge = KnowledgeBase()
+
+
+@lru_cache(maxsize=128)
+def session_knowledge(session_id: str) -> KnowledgeBase:
+    # UUID 是前端每個瀏覽器工作階段隨機產生的不可猜測識別碼；快取限制總記憶體。
+    UUID(session_id)
+    return KnowledgeBase()
+
+
+def retrieve(query: str, session_id: str | None = None) -> list[dict]:
+    base = session_knowledge(session_id) if session_id else knowledge
+    return base.retrieve(query)

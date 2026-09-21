@@ -1,5 +1,6 @@
 """API 資料驗證。"""
 from datetime import date
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -12,6 +13,7 @@ class PlanRequest(BaseModel):
     budget_twd: float = Field(gt=0, le=10_000_000)
     preference: str = Field(default="文化", max_length=100)
     use_live_api: bool = False
+    session_id: UUID | None = None
 
     @field_validator("destination")
     @classmethod

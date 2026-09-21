@@ -1,5 +1,5 @@
 """工具只做一件事，由單一 Agent 決定何時呼叫。"""
-from rag.knowledge import knowledge
+from rag.knowledge import retrieve
 from services.analytics import recommend_hotels, spending
 from services.external import currency, weather
 
@@ -20,5 +20,5 @@ def budget_tool(days: int, people: int, hotel_price: float, spot_costs: list[flo
     return spending(days, people, hotel_price, spot_costs, budget)
 
 
-def rag_tool(query: str) -> list[dict]:
-    return knowledge.retrieve(query)
+def rag_tool(query: str, session_id: str | None = None) -> list[dict]:
+    return retrieve(query, session_id)
