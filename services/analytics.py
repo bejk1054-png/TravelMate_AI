@@ -5,6 +5,12 @@ import pandas as pd
 from utils.config import DATA_DIR
 
 FEATURES = ["rating", "distance", "room_size", "stars", "season"]
+SQM_PER_PING = 3.305785
+
+
+def sqm_to_ping(square_metres: float) -> float:
+    """將平方公尺轉為台灣常用的坪數，僅用於顯示且保留一位小數。"""
+    return round(float(square_metres) / SQM_PER_PING, 1)
 
 
 def hotels() -> pd.DataFrame:
@@ -36,19 +42,24 @@ def recommend_hotels(destination: str, max_nightly: float) -> list[dict]:
 
 def summary(destination: str | None = None) -> dict:
     frame = hotels()
+    total_count = len(frame)
     if destination:
         frame = frame.loc[frame.destination.eq(destination)]
     if frame.empty:
-        return {"count": 0, "describe": {}, "by_room_type": [], "correlation": {}, "prices": []}
+        return {"count": 0, "total_count": total_count, "describe": {}, "by_room_type": [],
+                "correlation": {}, "prices": []}
     numeric = frame[["price", "rating", "distance", "room_size", "stars", "season"]]
+    prices = frame[["name", "destination", "room_type", "price", "rating", "distance", "room_size"]].copy()
+    prices["room_size_ping"] = prices["room_size"].map(sqm_to_ping)
     return {
         "count": len(frame),
+        "total_count": total_count,
         "describe": numeric.describe().round(2).fillna(0).to_dict(),
         "by_room_type": frame.groupby("room_type", as_index=False).agg(
             count=("price", "size"), mean_price=("price", "mean"), mean_rating=("rating", "mean")
         ).round(2).to_dict("records"),
         "correlation": numeric.corr().round(3).fillna(0).to_dict(),
-        "prices": frame[["name", "destination", "room_type", "price", "rating", "distance"]].to_dict("records"),
+        "prices": prices.to_dict("records"),
         "price_median": float(np.median(frame.price.to_numpy())),
     }
 

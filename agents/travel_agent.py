@@ -6,7 +6,11 @@ from services.llm import advice
 from services.nlp import analyze_reviews
 from tools.travel_tools import budget_tool, currency_tool, hotel_tool, rag_tool, weather_tool
 
-CURRENCIES = {"東京": "JPY", "京都": "JPY", "台北": "TWD", "首爾": "KRW"}
+CURRENCIES = {
+    "台北": "TWD", "台中": "TWD", "高雄": "TWD",
+    "東京": "JPY", "京都": "JPY", "大阪": "JPY", "札幌": "JPY",
+    "首爾": "KRW", "釜山": "KRW", "新加坡": "SGD",
+}
 
 
 def plan(request: dict) -> dict:

@@ -7,6 +7,12 @@ DESTINATION_COORDINATES = {
     "東京": {"name": "東京", "latitude": 35.6762, "longitude": 139.6503},
     "京都": {"name": "京都", "latitude": 35.0116, "longitude": 135.7681},
     "首爾": {"name": "首爾", "latitude": 37.5665, "longitude": 126.9780},
+    "台中": {"name": "台中", "latitude": 24.1477, "longitude": 120.6736},
+    "高雄": {"name": "高雄", "latitude": 22.6273, "longitude": 120.3014},
+    "大阪": {"name": "大阪", "latitude": 34.6937, "longitude": 135.5023},
+    "札幌": {"name": "札幌", "latitude": 43.0618, "longitude": 141.3545},
+    "釜山": {"name": "釜山", "latitude": 35.1796, "longitude": 129.0756},
+    "新加坡": {"name": "新加坡", "latitude": 1.3521, "longitude": 103.8198},
 }
 
 

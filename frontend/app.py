@@ -13,6 +13,8 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 st.set_page_config(page_title="TravelMate AI", page_icon="🧭", layout="wide")
 st.title("🧭 TravelMate AI｜旅遊、住宿與消費決策助理")
 st.caption("示範資料與估算工具，並非即時訂房或保證報價。")
+DESTINATIONS = ["台北", "台中", "高雄", "東京", "京都", "大阪", "札幌", "首爾", "釜山", "新加坡"]
+SQM_PER_PING = 3.305785
 if "rag_session_id" not in st.session_state:
     st.session_state["rag_session_id"] = str(uuid4())
 
@@ -44,6 +46,19 @@ def request(method: str, route: str, **kwargs):
     return None
 
 
+def hotel_table(rows: list[dict]) -> pd.DataFrame:
+    """將後端住宿欄位轉成中文顯示，並加入平方公尺對應的約略坪數。"""
+    frame = pd.DataFrame(rows)
+    if "room_size" in frame.columns:
+        frame["room_size_ping"] = (frame["room_size"] / SQM_PER_PING).round(1)
+    return frame.rename(columns={
+        "name": "住宿名稱", "destination": "目的地", "room_type": "房型",
+        "price": "每晚價格（TWD）", "rating": "評分", "distance": "距離（公里）",
+        "room_size": "房間大小（平方公尺）", "room_size_ping": "約合坪數",
+        "stars": "星級", "season": "季節級別",
+    })
+
+
 with st.sidebar:
     st.subheader("後端狀態")
     health = request("GET", "/health")
@@ -57,7 +72,7 @@ tab_plan, tab_data, tab_knowledge, tab_model = st.tabs(["行程規劃", "資料�
 with tab_plan:
     with st.form("plan"):
         col1, col2, col3 = st.columns(3)
-        destination = col1.selectbox("目的地", ["台北", "東京", "京都", "首爾"])
+        destination = col1.selectbox("目的地", DESTINATIONS)
         start_date = col2.date_input("出發日期", value=date.today())
         days = col3.number_input("旅遊天數", min_value=1, max_value=14, value=3)
         people = col1.number_input("人數", min_value=1, max_value=20, value=2)
@@ -80,7 +95,7 @@ with tab_plan:
         left, right = st.columns(2)
         with left:
             st.subheader("住宿推薦")
-            st.dataframe(pd.DataFrame(result["hotels"]), hide_index=True, use_container_width=True)
+            st.dataframe(hotel_table(result["hotels"]), hide_index=True, use_container_width=True)
             st.subheader("景點推薦")
             st.dataframe(pd.DataFrame(result["spots"]), hide_index=True, use_container_width=True)
         with right:
@@ -114,18 +129,22 @@ with tab_plan:
             st.json(result["rag_sources"])
 
 with tab_data:
-    st.write("比較所選目的地的住宿價格、評分、距離及房型，並提供描述統計、房型分組與相關係數。")
-    analytics_destination = st.selectbox("分析目的地", ["台北", "東京", "京都", "首爾"],
-                                         index=["台北", "東京", "京都", "首爾"].index(destination),
+    st.write("分析 40 筆示範住宿的價格、評分、距離、房型與房間大小，並提供描述統計、房型分組與相關係數。")
+    analysis_options = ["全部目的地"] + DESTINATIONS
+    analytics_destination = st.selectbox("分析目的地", analysis_options,
+                                         index=analysis_options.index(destination),
                                          key="analytics_destination")
     if st.button("載入住宿統計"):
-        data = request("GET", "/api/analytics", params={"destination": analytics_destination})
+        selected_destination = "" if analytics_destination == "全部目的地" else analytics_destination
+        data = request("GET", "/api/analytics", params={"destination": selected_destination})
         if data:
             if data["count"] == 0:
                 st.warning("所選目的地目前沒有住宿資料。")
             else:
-                st.metric(f"{analytics_destination}住宿資料筆數", data["count"])
-                st.dataframe(pd.DataFrame(data["prices"]), hide_index=True, use_container_width=True)
+                metric_left, metric_right = st.columns(2)
+                metric_left.metric(f"{analytics_destination}住宿資料筆數", data["count"])
+                metric_right.metric("全部示範住宿筆數", data["total_count"])
+                st.dataframe(hotel_table(data["prices"]), hide_index=True, use_container_width=True)
                 st.bar_chart(pd.DataFrame(data["by_room_type"]).set_index("room_type")["mean_price"])
                 with st.expander("查看 describe / groupby / corr"):
                     st.write("描述統計（describe）", data["describe"])
@@ -152,7 +171,9 @@ with tab_model:
     with st.form("model"):
         rating = st.slider("評分", 0.0, 5.0, 4.3)
         distance = st.number_input("距離市中心（公里）", 0.0, 100.0, 1.0)
-        room_size = st.number_input("房間大小（平方公尺）", 1.0, 1000.0, 25.0)
+        room_size = st.number_input("房間大小（平方公尺）", 1.0, 1000.0, 25.0,
+                                    help="1 坪約等於 3.3058 平方公尺")
+        st.caption(f"目前輸入約 {room_size / SQM_PER_PING:.1f} 坪（1 坪約 3.3058 平方公尺）")
         stars = st.slider("星級", 1, 5, 3)
         season = st.selectbox("季節價格級別", [1, 2, 3])
         predict_clicked = st.form_submit_button("預測示範價格")

@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from main import app
 from rag.knowledge import chunks, extract, knowledge, session_knowledge
-from services.analytics import hotels, spending, summary
+from services.analytics import hotels, spending, sqm_to_ping, summary
 from services import external, llm
 
 client = TestClient(app)
@@ -23,7 +23,7 @@ def test_health_and_plan():
 
 
 def test_all_supported_destinations_and_tight_budget_fallback():
-    for destination in ("台北", "東京", "京都", "首爾"):
+    for destination in ("台北", "台中", "高雄", "東京", "京都", "大阪", "札幌", "首爾", "釜山", "新加坡"):
         response = client.post("/api/plan", json={"destination": destination,
             "start_date": "2026-10-01", "days": 2, "people": 1,
             "budget_twd": 1000, "preference": "文化"})
@@ -38,15 +38,19 @@ def test_all_supported_destinations_and_tight_budget_fallback():
 
 
 def test_analytics_prediction_and_validation():
-    assert len(hotels()) >= 12
-    assert summary()["count"] >= 12
+    assert len(hotels()) >= 25
+    assert summary()["count"] >= 25
+    assert summary()["total_count"] == 40
     prediction = client.post("/api/predict", json={"rating": 4.2, "distance": 1.0,
         "room_size": 25, "stars": 3, "season": 2})
     assert prediction.status_code == 200, prediction.text
     assert prediction.json()["predicted_price_twd"] > 0
     taipei = client.get("/api/analytics", params={"destination": "台北"}).json()
     assert taipei["count"] == 4
+    assert taipei["total_count"] == 40
     assert {item["destination"] for item in taipei["prices"]} == {"台北"}
+    assert all("room_size" in item and "room_size_ping" in item for item in taipei["prices"])
+    assert sqm_to_ping(25) == 7.6
     assert spending(4, 2, 2000, [0, 0, 0, 0], 30000)["components"]["住宿"] == 6000
     assert client.post("/api/plan", json={"destination": " ", "start_date": "2026-10-01",
         "days": 0, "people": 2, "budget_twd": 30000}).status_code == 422
@@ -89,3 +93,11 @@ def test_currency_and_personalized_fallback(monkeypatch):
                      "remaining": -4000, "daily": 4750, "within_budget": False}})
     assert "超出預算 4,000 元" in result["text"]
     assert "測試旅館" in result["text"]
+
+
+def test_destination_data_is_complete():
+    supported = {"台北", "台中", "高雄", "東京", "京都", "大阪", "札幌", "首爾", "釜山", "新加坡"}
+    frame = hotels()
+    assert set(frame["destination"]) == supported
+    assert frame.groupby("destination").size().eq(4).all()
+    assert set(external.DESTINATION_COORDINATES) == supported

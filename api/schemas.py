@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class PlanRequest(BaseModel):
-    destination: Literal["台北", "東京", "京都", "首爾"]
+    destination: Literal["台北", "台中", "高雄", "東京", "京都", "大阪", "札幌", "首爾", "釜山", "新加坡"]
     start_date: date
     days: int = Field(ge=1, le=14)
     people: int = Field(ge=1, le=20)
