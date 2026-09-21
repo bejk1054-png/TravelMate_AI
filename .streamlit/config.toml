@@ -1,0 +1,4 @@
+[server]
+# 與 FastAPI 後端的知識庫檔案限制一致，避免前端顯示錯誤的 200 MB 預設值。
+maxUploadSize = 5
+maxMessageSize = 10
