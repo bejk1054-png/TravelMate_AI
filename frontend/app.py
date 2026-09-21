@@ -43,7 +43,10 @@ def request(method: str, route: str, **kwargs):
 with st.sidebar:
     st.subheader("後端狀態")
     health = request("GET", "/health")
-    st.success("已連線") if health else st.warning("尚未連線")
+    if health:
+        st.success("已連線")
+    else:
+        st.warning("尚未連線")
     st.caption(api_url())
 
 tab_plan, tab_data, tab_knowledge, tab_model = st.tabs(["行程規劃", "資料分析", "旅遊知識庫", "價格模型"])
