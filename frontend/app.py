@@ -28,7 +28,8 @@ def api_url():
 
 def request(method: str, route: str, **kwargs):
     try:
-        with httpx.Client(timeout=30) as client:
+        # Render 免費服務休眠後重新啟動可能超過 50 秒，避免首個請求過早失敗。
+        with httpx.Client(timeout=90) as client:
             response = client.request(method, api_url() + route, **kwargs)
             response.raise_for_status()
             return response.json()

@@ -75,7 +75,7 @@ git push -u origin main
 
 1. Render 建立 Python Web Service，root directory 留空（若上層目錄才是 repo 根則設 `TravelMate_AI`）；build `pip install -r requirements.txt`；start `uvicorn main:app --host 0.0.0.0 --port $PORT`；Python 設為 3.12。也可使用 `render.yaml` blueprint，其 `rootDir: .` 假設本目錄為 repo 根。選用 LLM 時在 Render Secrets/Environment 設 `OPENAI_API_KEY`。
 2. Streamlit Community Cloud 的 main file path 設 `TravelMate_AI/frontend/app.py`（若 repo 根是此目錄則 `frontend/app.py`）；Advanced settings 選 Python 3.12，Secrets 加入 `TRAVELMATE_API_URL = "https://你的後端.onrender.com"`。Streamlit 會尋找專案根 `requirements.txt`，若建立 repo 根在上層，建議改讓本目錄做 repo 根。前端與後端同時安裝完整依賴是較簡單、但較重的部署方式。
-3. 上線後測試 `/health`、表單、分析、模型與知識上傳。免費/無持久化磁碟的 SQLite、joblib 和上傳索引可能在重啟後消失；正式資料應改用託管資料庫及持久化儲存。不要在前端 Secrets 放後端的 LLM 金鑰。
+3. 上線後測試 `/health`、表單、分析、模型與知識上傳。Render 免費服務閒置後會休眠，前端允許 90 秒等待首次喚醒。免費/無持久化磁碟的 SQLite、joblib 和上傳索引可能在重啟後消失；正式資料應改用託管資料庫及持久化儲存。不要在前端 Secrets 放後端的 LLM 金鑰。
 
 部署前檢查：從根目錄執行 import 與 pytest；確認 `requirements.txt`（含 `python-multipart`）、Python 3.12、`frontend/app.py` 路徑、`data/*.csv` 與 `data/knowledge.txt` 已提交、`models/*.joblib` 可在啟動時產生、`.env` 未提交、後端環境變數與 Streamlit 的後端 URL 正確。若 repo 根改為上層，需同步修改 `render.yaml` 的 `rootDir`。
 
