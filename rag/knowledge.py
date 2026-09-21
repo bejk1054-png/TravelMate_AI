@@ -16,6 +16,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from utils.config import KNOWLEDGE_PATH
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+BUILTIN_DESTINATIONS = {"台北", "台中", "高雄", "東京", "京都", "大阪", "札幌", "首爾", "釜山", "新加坡"}
 
 
 def extract(filename: str, content: bytes) -> str:
@@ -78,9 +79,20 @@ class KnowledgeBase:
         if not query.strip():
             return []
         scores = cosine_similarity(self.vectorizer.transform([query]), self.matrix).ravel()
-        indices = scores.argsort()[::-1][:k]
-        return [{**self.documents[index], "score": round(float(scores[index]), 3)}
-                for index in indices if scores[index] > 0]
+        results = []
+        for index in scores.argsort()[::-1]:
+            if scores[index] <= 0:
+                continue
+            document = self.documents[index]
+            # 內建筆記以「城市：」開頭；不可只因偏好詞相同就把東京內容給肯亞。
+            label = document["text"].split("：", 1)[0].strip()
+            if (document["source"] == "內建旅遊筆記" and label in BUILTIN_DESTINATIONS
+                    and label not in query):
+                continue
+            results.append({**document, "score": round(float(scores[index]), 3)})
+            if len(results) >= k:
+                break
+        return results
 
 
 knowledge = KnowledgeBase()

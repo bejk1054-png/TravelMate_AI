@@ -80,6 +80,8 @@ def test_knowledge_upload():
     assert session_knowledge(session_id).retrieve("台北捷運")
     assert all(item["source"] != "note.txt" for item in session_knowledge(str(uuid4())).retrieve("台北捷運"))
     assert "台北" in knowledge.retrieve("台北 美食", k=1)[0]["text"]
+    assert knowledge.retrieve("肯亞 文化") == []
+    assert all("首爾" not in item["text"] for item in knowledge.retrieve("東京 文化"))
 
 
 def test_weather_uses_supported_city_coordinates(monkeypatch):
