@@ -14,10 +14,12 @@ def plan(request: dict) -> dict:
     days, people, budget = request["days"], request["people"], request["budget_twd"]
     selected_spots = spots(destination, request["preference"])
     # 為餐食、交通與景點保留一半預算，按房間數分配住宿上限。
-    max_nightly = budget * 0.5 / days / ((people + 1) // 2)
+    nights = max(days - 1, 1)
+    max_nightly = budget * 0.5 / nights / ((people + 1) // 2)
     hotels = hotel_tool(destination, max_nightly)
     if not hotels:
-        hotels = hotel_tool(destination, float("inf"))
+        # 預算內沒有資料時改以最低價格優先，避免備援反而選到最昂貴住宿。
+        hotels = sorted(hotel_tool(destination, float("inf")), key=lambda item: (item["price"], -item["rating"]))
     chosen = hotels[0] if hotels else None
     itinerary = []
     start = date.fromisoformat(request["start_date"])
@@ -41,10 +43,11 @@ def plan(request: dict) -> dict:
                 external[name] = call()
             except (RuntimeError, ValueError, KeyError) as exc:
                 external[name] = {"available": False, "message": str(exc)}
+    reviews = analyze_reviews(destination)
     facts = {"destination": destination, "days": days, "preference": request["preference"],
-             "spending": spending, "notes": notes}
+             "spending": spending, "hotel": chosen, "external": external, "notes": notes}
     return {"destination": destination, "itinerary": itinerary, "hotels": hotels,
-            "spots": selected_spots, "spending": spending, "reviews": analyze_reviews(destination),
+            "spots": selected_spots, "spending": spending, "reviews": reviews,
             "rag_sources": notes, "external": external, "advice": advice(facts),
             "data_notice": "住宿、景點與評論為示範資料；價格均為新台幣估算，非即時房價或訂房服務。",
             "tool_trace": ["hotel_tool", "budget_tool", "rag_tool"] +

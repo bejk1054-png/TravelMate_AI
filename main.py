@@ -55,8 +55,6 @@ async def upload_knowledge(file: UploadFile = File(...), session_id: UUID = Form
         content = await file.read(5 * 1024 * 1024 + 1)
         text = extract(file.filename or "", content)
         base = session_knowledge(str(session_id))
-        if len(base.documents) >= 220:
-            raise ValueError("此工作階段的知識庫已達上限，請重新整理頁面")
         count = base.add((file.filename or "筆記").split("/")[-1].split("\\")[-1], text)
     except (ValueError, UnicodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

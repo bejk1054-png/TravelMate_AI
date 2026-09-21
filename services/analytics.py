@@ -56,7 +56,8 @@ def summary(destination: str | None = None) -> dict:
 def spending(days: int, people: int, hotel_price: float, spot_costs: list[float], budget: float) -> dict:
     # 住宿按房間估算，假設一間房最多兩人；其他費用按人計。
     rooms = int(np.ceil(people / 2))
-    lodging = float(hotel_price * days * rooms)
+    nights = max(days - 1, 0)
+    lodging = float(hotel_price * nights * rooms)
     attractions = float(np.sum(spot_costs) * people)
     meals = float(900 * days * people)
     transport = float(350 * days * people)
@@ -64,4 +65,5 @@ def spending(days: int, people: int, hotel_price: float, spot_costs: list[float]
     total = float(np.sum(list(components.values())))
     return {"components": components, "total": total, "remaining": round(budget - total, 2),
             "daily": round(total / days, 2), "within_budget": total <= budget,
-            "assumptions": "新台幣；每房最多兩人；每人每日餐食 900、交通 350；不含機票與跨城交通。"}
+            "assumptions": f"新台幣；{days} 天按 {nights} 晚住宿估算；每房最多兩人；"
+                           "每人每日餐食 900、交通 350；不含機票與跨城交通。"}

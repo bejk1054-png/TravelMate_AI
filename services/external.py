@@ -44,8 +44,12 @@ def currency(base: str = "TWD", quote: str = "JPY") -> dict:
         raise ValueError("請使用三碼幣別代碼")
     if base == quote:
         return {"base": base, "quote": quote, "rate": 1.0, "date": "相同幣別"}
-    data = _get(f"https://api.frankfurter.dev/v2/rate/{base.lower()}/{quote.lower()}", {})
-    rate = data.get("rate")
+    # Frankfurter 不提供 TWD；改用免金鑰且支援專案所需幣別的公開匯率端點。
+    data = _get(f"https://open.er-api.com/v6/latest/{base}", {})
+    if data.get("result") != "success":
+        raise RuntimeError("匯率服務回傳失敗")
+    rate = (data.get("rates") or {}).get(quote)
     if rate is None:
         raise RuntimeError("匯率服務沒有提供所選幣別")
-    return {"base": base, "quote": quote, "rate": rate, "date": data.get("date")}
+    return {"base": base, "quote": quote, "rate": round(float(rate), 6),
+            "date": data.get("time_last_update_utc", "未知")}

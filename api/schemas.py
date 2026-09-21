@@ -1,12 +1,13 @@
 """API 資料驗證。"""
 from datetime import date
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
 
 class PlanRequest(BaseModel):
-    destination: str = Field(min_length=1, max_length=50)
+    destination: Literal["台北", "東京", "京都", "首爾"]
     start_date: date
     days: int = Field(ge=1, le=14)
     people: int = Field(ge=1, le=20)
@@ -15,9 +16,11 @@ class PlanRequest(BaseModel):
     use_live_api: bool = False
     session_id: UUID | None = None
 
-    @field_validator("destination")
+    @field_validator("destination", mode="before")
     @classmethod
-    def strip_destination(cls, value: str) -> str:
+    def strip_destination(cls, value):
+        if not isinstance(value, str):
+            return value
         value = value.strip()
         if not value:
             raise ValueError("目的地不可空白")

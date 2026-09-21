@@ -34,7 +34,11 @@ def request(method: str, route: str, **kwargs):
             response.raise_for_status()
             return response.json()
     except httpx.HTTPStatusError as exc:
-        st.error(f"後端回應錯誤 {exc.response.status_code}：{exc.response.text[:300]}")
+        try:
+            detail = exc.response.json().get("detail", "未知錯誤")
+        except (ValueError, AttributeError):
+            detail = exc.response.text[:300]
+        st.error(f"後端回應錯誤 {exc.response.status_code}：{detail}")
     except (httpx.RequestError, ValueError) as exc:
         st.error(f"無法連線後端：{exc}。請先啟動 FastAPI 或設定後端網址。")
     return None
@@ -90,26 +94,48 @@ with tab_plan:
             st.write(result["advice"]["text"])
             st.caption(result["advice"]["source"])
             st.write("評論摘要：", result["reviews"]["summary"])
-            if result["external"]:
-                st.json(result["external"])
+            external = result["external"]
+            if external:
+                st.subheader("即時資訊")
+                weather = external.get("weather")
+                if weather and weather.get("available"):
+                    st.write(f"天氣：{weather['date']}，{weather['min_c']}–{weather['max_c']}°C，"
+                             f"最高降雨機率 {weather['rain_probability']}%")
+                elif weather:
+                    st.warning(f"天氣：{weather.get('message', '目前無法取得')}")
+                currency = external.get("currency")
+                if currency and currency.get("rate") is not None:
+                    st.write(f"匯率：1 {currency['base']} ≈ {currency['rate']} {currency['quote']}"
+                             f"（更新：{currency['date']}）")
+                elif currency:
+                    st.warning(f"匯率：{currency.get('message', '目前無法取得')}")
         with st.expander("查看 Agent 工具與 RAG 來源"):
             st.write("工具：", " → ".join(result["tool_trace"]))
             st.json(result["rag_sources"])
 
 with tab_data:
+    st.write("比較所選目的地的住宿價格、評分、距離及房型，並提供描述統計、房型分組與相關係數。")
+    analytics_destination = st.selectbox("分析目的地", ["台北", "東京", "京都", "首爾"],
+                                         index=["台北", "東京", "京都", "首爾"].index(destination),
+                                         key="analytics_destination")
     if st.button("載入住宿統計"):
-        data = request("GET", "/api/analytics")
+        data = request("GET", "/api/analytics", params={"destination": analytics_destination})
         if data:
-            st.metric("資料筆數", data["count"])
-            st.dataframe(pd.DataFrame(data["prices"]), hide_index=True)
-            st.bar_chart(pd.DataFrame(data["by_room_type"]).set_index("room_type")["mean_price"])
-            with st.expander("describe / groupby / corr"):
-                st.write("describe", data["describe"])
-                st.write("groupby", data["by_room_type"])
-                st.write("corr", data["correlation"])
+            if data["count"] == 0:
+                st.warning("所選目的地目前沒有住宿資料。")
+            else:
+                st.metric(f"{analytics_destination}住宿資料筆數", data["count"])
+                st.dataframe(pd.DataFrame(data["prices"]), hide_index=True, use_container_width=True)
+                st.bar_chart(pd.DataFrame(data["by_room_type"]).set_index("room_type")["mean_price"])
+                with st.expander("查看 describe / groupby / corr"):
+                    st.write("描述統計（describe）", data["describe"])
+                    st.write("依房型分組（groupby）", data["by_room_type"])
+                    st.write("數值相關係數（corr）", data["correlation"])
 
 with tab_knowledge:
-    st.write("上傳 PDF、TXT、CSV 或個人旅遊筆記；僅保留在後端記憶體，請勿上傳敏感個資。")
+    st.write("上傳 PDF、TXT、CSV 或個人旅遊筆記，系統會切分內容並建立暫存 RAG 檢索索引。")
+    st.info("加入後請回到「行程規劃」重新產生行程；相關片段會顯示在「查看 Agent 工具與 RAG 來源」。")
+    st.caption("內容只保留在目前後端記憶體，服務重啟後消失；請勿上傳敏感個資。")
     file = st.file_uploader("選擇檔案（最多 5 MB）", type=["pdf", "txt", "csv"])
     if file and st.button("加入知識庫"):
         if file.size > 5 * 1024 * 1024:

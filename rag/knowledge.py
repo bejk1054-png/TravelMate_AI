@@ -41,8 +41,16 @@ def extract(filename: str, content: bytes) -> str:
 
 
 def chunks(text: str, size: int = 400, overlap: int = 60) -> list[str]:
-    clean = re.sub(r"\s+", " ", text).strip()
-    return [clean[index:index + size] for index in range(0, len(clean), size - overlap) if clean[index:index + size]]
+    # 優先依段落／句子切分，避免不同城市的筆記全部混進同一個檢索片段。
+    sentences = [item.strip() for item in re.split(r"(?<=[。！？])\s*|[\r\n]+", text) if item.strip()]
+    result = []
+    for sentence in sentences:
+        if len(sentence) <= size:
+            result.append(sentence)
+        else:
+            result.extend(sentence[index:index + size]
+                          for index in range(0, len(sentence), size - overlap) if sentence[index:index + size])
+    return result
 
 
 class KnowledgeBase:
@@ -59,6 +67,8 @@ class KnowledgeBase:
             raise ValueError("文件沒有可讀的文字")
         if len(parts) > 200:
             raise ValueError("文件切塊不可超過 200 個")
+        if len(self.documents) + len(parts) > 220:
+            raise ValueError("此工作階段的知識庫已達上限，請重新整理頁面")
         self.documents.extend({"source": source, "text": part} for part in parts)
         self.vectorizer = TfidfVectorizer(analyzer="char", ngram_range=(2, 3), max_features=20000)
         self.matrix = self.vectorizer.fit_transform([item["text"] for item in self.documents])
