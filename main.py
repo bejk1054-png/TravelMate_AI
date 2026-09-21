@@ -1,0 +1,57 @@
+"""FastAPI 入口：API → 主 Agent → Service / Tools → 資料層。"""
+from fastapi import FastAPI, File, HTTPException, UploadFile
+
+from agents.travel_agent import plan
+from api.schemas import PlanRequest, PredictRequest
+from database.repository import recent_plans, save_plan
+from models.price_model import predict
+from rag.knowledge import extract, knowledge
+from services.analytics import summary
+
+app = FastAPI(title="TravelMate AI", version="1.0.0")
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/api/plan")
+def create_plan(body: PlanRequest):
+    try:
+        result = plan(body.model_dump(mode="json"))
+        result["plan_id"] = save_plan(body.model_dump(mode="json"), result)
+        return result
+    except (OSError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=500, detail=f"行程產生失敗：{type(exc).__name__}") from exc
+
+
+@app.get("/api/analytics")
+def analytics(destination: str = ""):
+    return summary(destination or None)
+
+
+@app.post("/api/predict")
+def price_prediction(body: PredictRequest):
+    return predict(body.model_dump())
+
+
+@app.get("/api/plans")
+def plans():
+    return recent_plans()
+
+
+@app.post("/api/knowledge")
+async def upload_knowledge(file: UploadFile = File(...)):
+    # 限制傳輸大小並避免顯示伺服器路徑；公開展示站不建議開放任意上傳。
+    if file.content_type not in ("text/plain", "text/csv", "application/pdf", "application/octet-stream"):
+        raise HTTPException(status_code=400, detail="不支援的檔案類型")
+    try:
+        content = await file.read(5 * 1024 * 1024 + 1)
+        text = extract(file.filename or "", content)
+        count = knowledge.add((file.filename or "筆記").split("/")[-1].split("\\")[-1], text)
+    except (ValueError, UnicodeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await file.close()
+    return {"chunks": count, "message": "已加入暫存知識庫；後端重啟後會消失"}
