@@ -5,6 +5,7 @@ from uuid import uuid4
 from main import app
 from rag.knowledge import chunks, extract, session_knowledge
 from services.analytics import hotels, summary
+from services import external
 
 client = TestClient(app)
 
@@ -41,3 +42,17 @@ def test_knowledge_upload():
     assert response.status_code == 200, response.text
     assert session_knowledge(session_id).retrieve("台北捷運")
     assert all(item["source"] != "note.txt" for item in session_knowledge(str(uuid4())).retrieve("台北捷運"))
+
+
+def test_weather_uses_supported_city_coordinates(monkeypatch):
+    # 中文目的地應直接轉成固定座標，不再依賴外部地名解析。
+    def fake_get(url, params):
+        assert "forecast" in url
+        assert params["latitude"] == 25.0330
+        return {"daily": {"time": ["2026-09-21"], "temperature_2m_max": [30],
+            "temperature_2m_min": [24], "precipitation_probability_max": [40]}}
+
+    monkeypatch.setattr(external, "_get", fake_get)
+    result = external.weather("台北", "2026-09-21")
+    assert result == {"available": True, "date": "2026-09-21", "location": "台北",
+        "max_c": 30, "min_c": 24, "rain_probability": 40}

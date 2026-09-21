@@ -1,6 +1,14 @@
 """外部 API 的界線；失敗時回報原因，不捏造即時資料。"""
 import httpx
 
+# 系統目前支援的目的地固定，直接使用官方城市中心座標，避免地名 API 無法解析中文。
+DESTINATION_COORDINATES = {
+    "台北": {"name": "台北", "latitude": 25.0330, "longitude": 121.5654},
+    "東京": {"name": "東京", "latitude": 35.6762, "longitude": 139.6503},
+    "京都": {"name": "京都", "latitude": 35.0116, "longitude": 135.7681},
+    "首爾": {"name": "首爾", "latitude": 37.5665, "longitude": 126.9780},
+}
+
 
 def _get(url: str, params: dict) -> dict:
     try:
@@ -13,11 +21,9 @@ def _get(url: str, params: dict) -> dict:
 
 
 def weather(destination: str, date: str) -> dict:
-    location = _get("https://geocoding-api.open-meteo.com/v1/search", {"name": destination, "count": 1})
-    matches = location.get("results") or []
-    if not matches:
-        raise RuntimeError("找不到目的地的天氣座標")
-    point = matches[0]
+    point = DESTINATION_COORDINATES.get(destination)
+    if point is None:
+        raise ValueError(f"尚未支援目的地：{destination}")
     forecast = _get("https://api.open-meteo.com/v1/forecast", {
         "latitude": point["latitude"], "longitude": point["longitude"],
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
