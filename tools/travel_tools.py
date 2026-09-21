@@ -2,7 +2,7 @@
 from rag.knowledge import retrieve
 from services.analytics import demo_destination_records, recommend_hotels, spending
 from services.booking import BookingServiceError, booking_search_url, search_accommodations, trip_dates
-from services.external import currency, weather
+from services.external import currency, destination_exchange, weather
 
 
 def weather_tool(destination: str, date: str) -> dict:
@@ -31,8 +31,11 @@ def booking_tool(destination: str, start_date: str, days: int, people: int) -> d
                 "source": "Booking.com 公開查價頁面", "message": str(exc)}
 
 
-def currency_tool(base: str, quote: str) -> dict:
-    return currency(base, quote)
+def currency_tool(destination_or_base: str, quote: str | None = None) -> dict:
+    """單一動作：可依目的地自動判斷幣別，也保留直接輸入幣別的教學介面。"""
+    if quote is not None:
+        return currency(destination_or_base, quote)
+    return destination_exchange(destination_or_base)
 
 
 def budget_tool(days: int, people: int, hotel_price: float, spot_costs: list[float], budget: float) -> dict:

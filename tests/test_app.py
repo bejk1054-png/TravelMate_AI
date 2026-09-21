@@ -5,7 +5,8 @@ from uuid import uuid4
 from main import app
 from rag.knowledge import chunks, extract, knowledge, session_knowledge
 from services.analytics import demo_destination_records, hotels, spending, sqm_to_ping, summary
-from services import booking, external, llm
+from services import booking, external, llm, location
+from services.location import city_search_name, destination_currency, resolve_country_code, split_city_country
 from utils.location import destination_candidates
 
 client = TestClient(app)
@@ -96,25 +97,48 @@ def test_weather_uses_supported_city_coordinates(monkeypatch):
 
 
 def test_free_text_destination_geocoding_fallback(monkeypatch):
-    """完整城市加國家查詢失敗時，應退回城市名稱，而不是讓整個行程失敗。"""
-    calls = []
+    """城市加國家應帶 ISO 國碼查地名，不應錯誤退回其他國家的同名城市。"""
+    location.country_capital.cache_clear()
 
-    def fake_get(url, params):
+    def fake_location_get(url, params):
         if "geocoding" in url:
-            calls.append(params["name"])
-            if params["name"] == "巴黎 法國":
-                raise RuntimeError("完整字串無法解析")
+            assert params["name"] == "巴黎"
+            assert params["countryCode"] == "FR"
             return {"results": [{"name": "巴黎", "latitude": 48.86, "longitude": 2.35}]}
+        raise AssertionError("城市查詢不應呼叫首都 API")
+
+    def fake_weather_get(url, params):
         return {"daily": {"time": ["2026-10-01"], "temperature_2m_max": [20],
                            "temperature_2m_min": [12], "precipitation_probability_max": [30]}}
 
-    monkeypatch.setattr(external, "_get", fake_get)
+    monkeypatch.setattr(location, "_get_json", fake_location_get)
+    monkeypatch.setattr(external, "_get", fake_weather_get)
     result = external.weather("巴黎 法國", "2026-10-01")
-    assert calls == ["巴黎 法國", "巴黎"]
     assert result["available"] is True
+    assert split_city_country("New York United States") == ("New York", "US")
+    assert city_search_name("紐約") == "New York City"
     assert destination_candidates("New York, United States") == [
         "New York United States", "New York"
     ]
+
+
+def test_country_only_uses_capital_and_standard_currency(monkeypatch):
+    """只輸入肯亞時，使用首都代表天氣並解析 KES，不可回傳空白匯率。"""
+    location.country_capital.cache_clear()
+    monkeypatch.setattr(location, "_get_json", lambda url, params: [
+        {"page": 1}, [{"capitalCity": "Nairobi", "latitude": "-1.2864",
+                       "longitude": "36.8172"}]
+    ])
+    monkeypatch.setattr(external, "_get", lambda url, params: {
+        "daily": {"time": ["2026-10-01"], "temperature_2m_max": [27],
+                  "temperature_2m_min": [14], "precipitation_probability_max": [10]}
+    })
+    weather = external.weather("肯亞", "2026-10-01")
+    assert weather["available"] is True
+    assert weather["location"] == "Nairobi（以首都代表）"
+    assert resolve_country_code("肯亞") == "KE"
+    assert resolve_country_code("肯尼亚") == "KE"
+    assert destination_currency("肯亞") == "KES"
 
 
 def test_currency_and_personalized_fallback(monkeypatch):

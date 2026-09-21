@@ -24,7 +24,7 @@
 | NLP | 住宿示範評論 → 詞典情緒、優缺點摘要 → `services/nlp.py` → 網頁評論摘要 |
 | RAG | TXT/PDF/CSV/筆記 → 切塊、字元 TF-IDF embedding、cosine retriever → `rag/knowledge.py` → Agent 的有來源內容與 LLM |
 | Agent / Tools | 表單 → 主 Agent 決定工具 → `agents/travel_agent.py`、`tools/travel_tools.py` → 預算、住宿、知識與外部資料 |
-| 外部 API | 目的地與日期 → Open-Meteo、公開匯率服務與 Booking Demand API，並處理錯誤 → `services/external.py`、`services/booking.py` → 即時資訊、Booking 房價或不可用提示 |
+| 外部 API | 目的地與日期 → CLDR 國名/幣別、世界銀行首都座標、Open-Meteo、公開匯率服務與 Booking Demand API，並處理錯誤 → `services/location.py`、`services/external.py`、`services/booking.py` → 即時資訊、Booking 房價或不可用提示 |
 | Database | 規劃結果 → SQLite 寫入與查詢 → `database/repository.py` → `/api/plans` |
 
 MCP 概念：`tools/travel_tools.py` 是穩定的工具介面，Agent 呼叫它們；若日後換成真正 MCP server/client，應在工具邊界加入 MCP adapter。本版本**沒有宣稱已實作 MCP 協定或 MCP server**。
@@ -54,6 +54,8 @@ py -m streamlit run frontend/app.py
 預設後端為 `http://127.0.0.1:8000`；瀏覽 `http://127.0.0.1:8000/docs` 查看 API。測試：`py -m pytest -q`。首次預測會訓練模型並建立被忽略的 `models/hotel_price.joblib`；首次規劃建立 `data/travelmate.db`。
 
 複製 `.env.example` 為 `.env`，可填 `OPENAI_API_KEY`；不填時仍可執行。勾選即時資料才呼叫外部天氣與匯率 API。日期若超出預報範圍會顯示不可用，不會捏造天氣。LLM 失敗會顯示規則式備援。上傳知識庫按隨機工作階段識別碼隔離，存在後端記憶體並於重啟或快取淘汰後消失；這不是登入機制，**仍勿上傳敏感筆記**。公開 API 的行程歷史查詢預設關閉；若在可信本機環境要開啟，設定 `ENABLE_HISTORY_API=1`。
+
+目的地可以輸入「肯亞」等國名，系統會以該國首都代表天氣並在畫面標示；輸入「奈洛比 肯亞」等城市＋國家時則優先使用城市。國名會透過 Babel/CLDR 解析繁中、簡中或英文名稱，並自動選擇當地現行法定幣別。城市名稱仍可能受第三方地名資料完整度影響，無法解析時會明確改用首都或回報原因，不會靜默猜測。
 
 ### Booking.com 即時價格與訂房
 

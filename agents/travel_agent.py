@@ -6,14 +6,6 @@ from services.llm import advice
 from services.nlp import analyze_reviews
 from tools.travel_tools import booking_tool, budget_tool, currency_tool, hotel_tool, rag_tool, weather_tool
 
-CURRENCIES = {
-    "台北": "TWD", "台中": "TWD", "高雄": "TWD",
-    "東京": "JPY", "京都": "JPY", "大阪": "JPY", "札幌": "JPY",
-    "首爾": "KRW", "釜山": "KRW", "新加坡": "SGD",
-    "巴黎": "EUR", "巴黎 法國": "EUR", "Paris": "EUR", "Paris France": "EUR",
-}
-
-
 def plan(request: dict) -> dict:
     destination = request["destination"]
     days, people, budget = request["days"], request["people"], request["budget_twd"]
@@ -46,15 +38,9 @@ def plan(request: dict) -> dict:
     # 天氣與匯率為可選外部呼叫；失敗要明示，不影響核心規劃。
     external = {}
     if request.get("use_live_api", False):
-        def destination_currency():
-            quote = CURRENCIES.get(destination)
-            if quote is None:
-                raise ValueError("自訂目的地尚未建立當地幣別對照")
-            return currency_tool("TWD", quote)
-
         for name, call in {
             "weather": lambda: weather_tool(destination, request["start_date"]),
-            "currency": destination_currency,
+            "currency": lambda: currency_tool(destination),
         }.items():
             try:
                 external[name] = call()

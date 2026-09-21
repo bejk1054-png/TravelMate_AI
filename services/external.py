@@ -1,7 +1,7 @@
 """外部 API 的界線；失敗時回報原因，不捏造即時資料。"""
 import httpx
 
-from utils.location import destination_candidates
+from services.location import LocationServiceError, destination_currency, geocode_destination
 
 # 系統目前支援的目的地固定，直接使用官方城市中心座標，避免地名 API 無法解析中文。
 DESTINATION_COORDINATES = {
@@ -31,24 +31,10 @@ def _get(url: str, params: dict) -> dict:
 def weather(destination: str, date: str) -> dict:
     point = DESTINATION_COORDINATES.get(destination)
     if point is None:
-        results = []
-        last_error = None
-        for candidate in destination_candidates(destination):
-            try:
-                results = _get("https://geocoding-api.open-meteo.com/v1/search", {
-                    "name": candidate, "count": 1, "language": "zh", "format": "json",
-                }).get("results") or []
-            except RuntimeError as exc:
-                last_error = exc
-                continue
-            if results:
-                break
-        if not results:
-            if last_error is not None:
-                raise last_error
-            raise ValueError(f"找不到目的地：{destination}")
-        point = {"name": results[0].get("name", destination),
-                 "latitude": results[0]["latitude"], "longitude": results[0]["longitude"]}
+        try:
+            point = geocode_destination(destination)
+        except LocationServiceError as exc:
+            raise ValueError(str(exc)) from exc
     forecast = _get("https://api.open-meteo.com/v1/forecast", {
         "latitude": point["latitude"], "longitude": point["longitude"],
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
@@ -58,9 +44,21 @@ def weather(destination: str, date: str) -> dict:
     if date not in dates:
         return {"available": False, "message": "選定日期不在天氣預報範圍（約未來 16 天）"}
     i = dates.index(date)
-    return {"available": True, "date": date, "location": point.get("name", destination),
+    location_name = point.get("name", destination)
+    if point.get("fallback_to_capital"):
+        location_name += "（以首都代表）"
+    return {"available": True, "date": date, "location": location_name,
             "max_c": forecast["temperature_2m_max"][i], "min_c": forecast["temperature_2m_min"][i],
             "rain_probability": forecast["precipitation_probability_max"][i]}
+
+
+def destination_exchange(destination: str, base: str = "TWD") -> dict:
+    """單一目的地動作：解析當地法定幣別後取得匯率。"""
+    try:
+        quote = destination_currency(destination)
+    except LocationServiceError as exc:
+        raise ValueError(str(exc)) from exc
+    return currency(base, quote)
 
 
 def currency(base: str = "TWD", quote: str = "JPY") -> dict:
