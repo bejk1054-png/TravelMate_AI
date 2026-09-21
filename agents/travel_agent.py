@@ -10,6 +10,7 @@ CURRENCIES = {
     "台北": "TWD", "台中": "TWD", "高雄": "TWD",
     "東京": "JPY", "京都": "JPY", "大阪": "JPY", "札幌": "JPY",
     "首爾": "KRW", "釜山": "KRW", "新加坡": "SGD",
+    "巴黎": "EUR", "巴黎 法國": "EUR", "Paris": "EUR", "Paris France": "EUR",
 }
 
 

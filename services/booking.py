@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 import httpx
 
 from utils.config import secret
+from utils.location import destination_candidates
 
 
 class BookingServiceError(RuntimeError):
@@ -53,16 +54,24 @@ def _post(path: str, payload: dict) -> dict:
 
 def _geocode(destination: str) -> dict:
     """以免金鑰地名服務取得座標，再交給 Booking 進行周邊搜尋。"""
-    try:
-        with httpx.Client(timeout=8, follow_redirects=False) as client:
-            response = client.get("https://geocoding-api.open-meteo.com/v1/search", params={
-                "name": destination, "count": 1, "language": "zh", "format": "json",
-            })
-            response.raise_for_status()
-            results = response.json().get("results") or []
-    except (httpx.HTTPError, ValueError, TypeError) as exc:
-        raise BookingServiceError(f"目的地解析失敗：{type(exc).__name__}") from exc
+    results = []
+    last_error = None
+    for candidate in destination_candidates(destination):
+        try:
+            with httpx.Client(timeout=8, follow_redirects=False) as client:
+                response = client.get("https://geocoding-api.open-meteo.com/v1/search", params={
+                    "name": candidate, "count": 1, "language": "zh", "format": "json",
+                })
+                response.raise_for_status()
+                results = response.json().get("results") or []
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            last_error = exc
+            continue
+        if results:
+            break
     if not results:
+        if last_error is not None:
+            raise BookingServiceError(f"目的地解析失敗：{type(last_error).__name__}") from last_error
         raise BookingServiceError("找不到該目的地，請輸入城市加國家，例如：巴黎 法國")
     return results[0]
 

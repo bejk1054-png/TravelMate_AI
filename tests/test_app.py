@@ -6,6 +6,7 @@ from main import app
 from rag.knowledge import chunks, extract, knowledge, session_knowledge
 from services.analytics import demo_destination_records, hotels, spending, sqm_to_ping, summary
 from services import booking, external, llm
+from utils.location import destination_candidates
 
 client = TestClient(app)
 
@@ -92,6 +93,28 @@ def test_weather_uses_supported_city_coordinates(monkeypatch):
     result = external.weather("台北", "2026-09-21")
     assert result == {"available": True, "date": "2026-09-21", "location": "台北",
         "max_c": 30, "min_c": 24, "rain_probability": 40}
+
+
+def test_free_text_destination_geocoding_fallback(monkeypatch):
+    """完整城市加國家查詢失敗時，應退回城市名稱，而不是讓整個行程失敗。"""
+    calls = []
+
+    def fake_get(url, params):
+        if "geocoding" in url:
+            calls.append(params["name"])
+            if params["name"] == "巴黎 法國":
+                raise RuntimeError("完整字串無法解析")
+            return {"results": [{"name": "巴黎", "latitude": 48.86, "longitude": 2.35}]}
+        return {"daily": {"time": ["2026-10-01"], "temperature_2m_max": [20],
+                           "temperature_2m_min": [12], "precipitation_probability_max": [30]}}
+
+    monkeypatch.setattr(external, "_get", fake_get)
+    result = external.weather("巴黎 法國", "2026-10-01")
+    assert calls == ["巴黎 法國", "巴黎"]
+    assert result["available"] is True
+    assert destination_candidates("New York, United States") == [
+        "New York United States", "New York"
+    ]
 
 
 def test_currency_and_personalized_fallback(monkeypatch):
