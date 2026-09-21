@@ -29,7 +29,13 @@ def _get(url: str, params: dict) -> dict:
 def weather(destination: str, date: str) -> dict:
     point = DESTINATION_COORDINATES.get(destination)
     if point is None:
-        raise ValueError(f"尚未支援目的地：{destination}")
+        results = _get("https://geocoding-api.open-meteo.com/v1/search", {
+            "name": destination, "count": 1, "language": "zh", "format": "json",
+        }).get("results") or []
+        if not results:
+            raise ValueError(f"找不到目的地：{destination}")
+        point = {"name": results[0].get("name", destination),
+                 "latitude": results[0]["latitude"], "longitude": results[0]["longitude"]}
     forecast = _get("https://api.open-meteo.com/v1/forecast", {
         "latitude": point["latitude"], "longitude": point["longitude"],
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",

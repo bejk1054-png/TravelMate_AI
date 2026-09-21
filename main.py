@@ -1,5 +1,6 @@
 """FastAPI 入口：API → 主 Agent → Service / Tools → 資料層。"""
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from datetime import date
 from uuid import UUID
 
 from agents.travel_agent import plan
@@ -7,7 +8,8 @@ from api.schemas import PlanRequest, PredictRequest
 from database.repository import recent_plans, save_plan
 from models.price_model import predict
 from rag.knowledge import extract, session_knowledge
-from services.analytics import summary
+from services.analytics import demo_destination_records, summary, summary_from_records
+from services.booking import BookingServiceError, booking_search_url, search_accommodations
 from utils.config import secret
 
 app = FastAPI(title="TravelMate AI", version="1.0.0")
@@ -29,8 +31,35 @@ def create_plan(body: PlanRequest):
 
 
 @app.get("/api/analytics")
-def analytics(destination: str = ""):
-    return summary(destination or None)
+def analytics(destination: str = Query(default="", max_length=80), checkin: date | None = None,
+              checkout: date | None = None, people: int = Query(default=2, ge=1, le=20)):
+    destination = destination.strip()
+    if destination:
+        valid_dates = bool(checkin and checkout and checkout > checkin)
+        rooms = (people + 1) // 2
+        if valid_dates:
+            search_url = booking_search_url(destination, checkin.isoformat(), checkout.isoformat(), people, rooms)
+            try:
+                booking = search_accommodations(destination, checkin.isoformat(), checkout.isoformat(),
+                                                 people, rooms, limit=40)
+            except BookingServiceError as exc:
+                booking = {"available": False, "hotels": [], "count": 0, "search_url": search_url,
+                           "source": "Booking.com 公開查價頁面", "message": str(exc)}
+        else:
+            booking = {"available": False, "hotels": [], "count": 0,
+                       "source": "TravelMate AI 教學資料",
+                       "message": "未提供有效入住與退房日期，因此顯示 40 筆教學樣本。"}
+        if booking["available"] and booking["hotels"]:
+            result = summary_from_records(booking["hotels"], booking["source"])
+        else:
+            fallback_source = "TravelMate AI 40 筆教學延伸樣本（非 Booking 即時價）"
+            result = summary_from_records(demo_destination_records(destination, 40), fallback_source)
+        result["booking"] = booking
+        return result
+    result = summary()
+    result["booking"] = {"available": False, "hotels": [], "count": 0,
+                         "message": "要取得 Booking 價格需同時提供目的地、入住日與退房日。"}
+    return result
 
 
 @app.post("/api/predict")

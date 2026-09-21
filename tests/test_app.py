@@ -4,8 +4,8 @@ from uuid import uuid4
 
 from main import app
 from rag.knowledge import chunks, extract, knowledge, session_knowledge
-from services.analytics import hotels, spending, sqm_to_ping, summary
-from services import external, llm
+from services.analytics import demo_destination_records, hotels, spending, sqm_to_ping, summary
+from services import booking, external, llm
 
 client = TestClient(app)
 
@@ -18,7 +18,8 @@ def test_health_and_plan():
     body = response.json()
     assert len(body["itinerary"]) == 3
     assert body["hotels"] and body["plan_id"] > 0
-    assert body["tool_trace"] == ["hotel_tool", "budget_tool", "rag_tool"]
+    assert body["tool_trace"] == ["booking_tool", "hotel_tool", "budget_tool", "rag_tool"]
+    assert body["booking_search_url"].startswith("https://www.booking.com/")
     assert client.get("/api/plans").status_code == 403
 
 
@@ -33,8 +34,13 @@ def test_all_supported_destinations_and_tight_budget_fallback():
         assert body["hotels"]
         assert body["hotels"][0]["price"] == min(item["price"] for item in body["hotels"])
         assert destination in body["advice"]["text"]
-    assert client.post("/api/plan", json={"destination": "巴黎", "start_date": "2026-10-01",
-        "days": 2, "people": 1, "budget_twd": 10000, "preference": "文化"}).status_code == 422
+    paris = client.post("/api/plan", json={"destination": "巴黎 法國", "start_date": "2026-10-01",
+        "days": 2, "people": 1, "budget_twd": 10000, "preference": "文化"})
+    assert paris.status_code == 200
+    paris_body = paris.json()
+    assert paris_body["hotels"]
+    assert all("非 Booking 即時價" in item["price_source"] for item in paris_body["hotels"])
+    assert "ss=%E5%B7%B4%E9%BB%8E+%E6%B3%95%E5%9C%8B" in paris_body["booking_search_url"]
 
 
 def test_analytics_prediction_and_validation():
@@ -46,11 +52,17 @@ def test_analytics_prediction_and_validation():
     assert prediction.status_code == 200, prediction.text
     assert prediction.json()["predicted_price_twd"] > 0
     taipei = client.get("/api/analytics", params={"destination": "台北"}).json()
-    assert taipei["count"] == 4
+    assert taipei["count"] == 40
     assert taipei["total_count"] == 40
     assert {item["destination"] for item in taipei["prices"]} == {"台北"}
     assert all("room_size" in item and "room_size_ping" in item for item in taipei["prices"])
     assert sqm_to_ping(25) == 7.6
+    booking_fallback = client.get("/api/analytics", params={"destination": "台北",
+        "checkin": "2026-10-01", "checkout": "2026-10-03", "people": 2}).json()
+    assert booking_fallback["booking"]["available"] is False
+    assert booking_fallback["count"] == 40
+    assert "非 Booking 即時價" in booking_fallback["source"]
+    assert booking_fallback["booking"]["search_url"].startswith("https://www.booking.com/")
     assert spending(4, 2, 2000, [0, 0, 0, 0], 30000)["components"]["住宿"] == 6000
     assert client.post("/api/plan", json={"destination": " ", "start_date": "2026-10-01",
         "days": 0, "people": 2, "budget_twd": 30000}).status_code == 422
@@ -101,3 +113,48 @@ def test_destination_data_is_complete():
     assert set(frame["destination"]) == supported
     assert frame.groupby("destination").size().eq(4).all()
     assert set(external.DESTINATION_COORDINATES) == supported
+    custom = demo_destination_records("巴黎 法國", 40)
+    assert len(custom) == 40
+    assert {item["destination"] for item in custom} == {"巴黎 法國"}
+    assert all("非 Booking 即時價" in item["price_source"] for item in custom)
+
+
+def test_booking_official_search_normalization(monkeypatch):
+    monkeypatch.setattr(booking, "_credentials", lambda: ("test-key", "12345"))
+    monkeypatch.setattr(booking, "_geocode", lambda destination: {
+        "name": destination, "latitude": 25.03, "longitude": 121.56
+    })
+    search_rows = [{"id": index, "currency": "TWD", "price": {"total": 6000 + index},
+                    "url": f"https://www.booking.com/hotel/{index}"} for index in range(40)]
+
+    def fake_post(path, payload):
+        if path == "accommodations/search":
+            assert payload["rows"] == 40
+            return {"data": search_rows}
+        return {"data": [{"id": index, "name": {"zh-tw": f"測試住宿 {index}"},
+                           "rating": 4.5, "location": {"latitude": 25.04, "longitude": 121.57}}
+                          for index in range(40)]}
+
+    monkeypatch.setattr(booking, "_post", fake_post)
+    result = booking.search_accommodations("台北", "2026-10-01", "2026-10-03", 2, 1, 40)
+    assert result["available"] is True
+    assert result["count"] == 40
+    assert result["hotels"][0]["price_source"] == "Booking.com Demand API"
+    assert result["hotels"][0]["price"] == 3000
+
+
+def test_booking_v32_currency_and_price_normalization(monkeypatch):
+    """確認 Demand API 3.2 的雙幣別與 display 價格不會變成物件或空值。"""
+    monkeypatch.setattr(booking, "_credentials", lambda: ("test-key", "12345"))
+    monkeypatch.setattr(booking, "_geocode", lambda destination: {
+        "name": destination, "latitude": 25.03, "longitude": 121.56
+    })
+    monkeypatch.setattr(booking, "_post", lambda path, payload: {
+        "data": [{"id": 1, "currency": {"accommodation": "JPY", "booker": "TWD"},
+                  "price": {"display": {"booker": 7200}},
+                  "url": "https://www.booking.com/hotel/test"}]
+    } if path == "accommodations/search" else {"data": []})
+    result = booking.search_accommodations("東京", "2026-10-01", "2026-10-03", 2, 1)
+    assert result["hotels"][0]["currency"] == "TWD"
+    assert result["hotels"][0]["price_total"] == 7200
+    assert result["hotels"][0]["price"] == 3600

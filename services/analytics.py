@@ -47,7 +47,7 @@ def summary(destination: str | None = None) -> dict:
         frame = frame.loc[frame.destination.eq(destination)]
     if frame.empty:
         return {"count": 0, "total_count": total_count, "describe": {}, "by_room_type": [],
-                "correlation": {}, "prices": []}
+                "correlation": {}, "prices": [], "source": "TravelMate AI 教學示範資料"}
     numeric = frame[["price", "rating", "distance", "room_size", "stars", "season"]]
     prices = frame[["name", "destination", "room_type", "price", "rating", "distance", "room_size"]].copy()
     prices["room_size_ping"] = prices["room_size"].map(sqm_to_ping)
@@ -61,7 +61,68 @@ def summary(destination: str | None = None) -> dict:
         "correlation": numeric.corr().round(3).fillna(0).to_dict(),
         "prices": prices.to_dict("records"),
         "price_median": float(np.median(frame.price.to_numpy())),
+        "source": "TravelMate AI 教學示範資料",
     }
+
+
+def summary_from_records(records: list[dict], source: str) -> dict:
+    """分析 Booking API 回傳的單一目的地住宿，不填造缺少欄位。"""
+    frame = pd.DataFrame(records)
+    if frame.empty:
+        return {"count": 0, "total_count": 0, "describe": {}, "by_room_type": [],
+                "correlation": {}, "prices": [], "source": source}
+    for column in ("price", "price_total", "rating", "distance", "room_size", "room_size_ping"):
+        if column in frame:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    priced = frame.dropna(subset=["price"]).copy()
+    numeric_columns = [column for column in (
+        "price", "price_total", "rating", "distance", "room_size", "stars", "season"
+    )
+                       if column in priced and priced[column].notna().any()]
+    numeric = priced[numeric_columns]
+    by_room = []
+    if not priced.empty and "room_type" in priced:
+        aggregations = {"count": ("price", "size"), "mean_price": ("price", "mean")}
+        if "rating" in priced and priced["rating"].notna().any():
+            aggregations["mean_rating"] = ("rating", "mean")
+        by_room = priced.groupby("room_type", as_index=False).agg(**aggregations).round(2).to_dict("records")
+    output_columns = [column for column in (
+        "name", "destination", "room_type", "price", "price_total", "currency", "rating",
+        "distance", "room_size", "room_size_ping", "stars", "season", "price_source", "booking_url"
+    ) if column in frame]
+    prices = frame[output_columns].replace({np.nan: None}).to_dict("records")
+    return {
+        "count": len(frame), "total_count": len(frame),
+        "describe": numeric.describe().round(2).fillna(0).to_dict() if not numeric.empty else {},
+        "by_room_type": by_room,
+        "correlation": numeric.corr().round(3).fillna(0).to_dict() if len(numeric_columns) > 1 else {},
+        "prices": prices,
+        "price_median": float(np.median(priced.price.to_numpy())) if not priced.empty else None,
+        "source": source,
+    }
+
+
+def demo_destination_records(destination: str, count: int = 40) -> list[dict]:
+    """建立單一目的地的教學分析樣本，不冒充真實旅館或 Booking 價格。"""
+    base = hotels().reset_index(drop=True)
+    if base.empty or not destination.strip():
+        return []
+    # 以目的地字串產生穩定的調整係數，讓同一輸入每次結果一致。
+    factor = 0.85 + (sum(destination.encode("utf-8")) % 31) / 100
+    output = []
+    for index in range(max(int(count), 0)):
+        source = base.iloc[index % len(base)]
+        room_size = float(source["room_size"])
+        output.append({
+            "name": f"{destination.strip()} 教學住宿 {index + 1:02d}",
+            "destination": destination.strip(), "room_type": source["room_type"],
+            "price": round(float(source["price"]) * factor / 10) * 10,
+            "rating": float(source["rating"]), "distance": float(source["distance"]),
+            "room_size": room_size, "room_size_ping": sqm_to_ping(room_size),
+            "stars": float(source["stars"]), "season": float(source["season"]),
+            "price_source": "TravelMate AI 教學延伸樣本（非 Booking 即時價）",
+        })
+    return output
 
 
 def spending(days: int, people: int, hotel_price: float, spot_costs: list[float], budget: float) -> dict:

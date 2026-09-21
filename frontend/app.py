@@ -1,7 +1,7 @@
 """Streamlit 前端：僅以 HTTP 呼叫後端，不直接讀取資料庫與金鑰。"""
 import os
 from uuid import uuid4
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 import pandas as pd
@@ -12,8 +12,7 @@ from pathlib import Path
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 st.set_page_config(page_title="TravelMate AI", page_icon="🧭", layout="wide")
 st.title("🧭 TravelMate AI｜旅遊、住宿與消費決策助理")
-st.caption("示範資料與估算工具，並非即時訂房或保證報價。")
-DESTINATIONS = ["台北", "台中", "高雄", "東京", "京都", "大阪", "札幌", "首爾", "釜山", "新加坡"]
+st.caption("Booking 憑證啟用後可取得即時房源；所有訂房均跳轉 Booking.com 確認。")
 SQM_PER_PING = 3.305785
 if "rag_session_id" not in st.session_state:
     st.session_state["rag_session_id"] = str(uuid4())
@@ -50,13 +49,28 @@ def hotel_table(rows: list[dict]) -> pd.DataFrame:
     """將後端住宿欄位轉成中文顯示，並加入平方公尺對應的約略坪數。"""
     frame = pd.DataFrame(rows)
     if "room_size" in frame.columns:
-        frame["room_size_ping"] = (frame["room_size"] / SQM_PER_PING).round(1)
+        numeric_size = pd.to_numeric(frame["room_size"], errors="coerce")
+        frame["room_size_ping"] = (numeric_size / SQM_PER_PING).round(1)
     return frame.rename(columns={
         "name": "住宿名稱", "destination": "目的地", "room_type": "房型",
         "price": "每晚價格（TWD）", "rating": "評分", "distance": "距離（公里）",
+        "price_total": "入住期間總價", "currency": "幣別", "price_source": "價格來源",
         "room_size": "房間大小（平方公尺）", "room_size_ping": "約合坪數",
         "stars": "星級", "season": "季節級別",
+        "booking_url": "Booking.com 訂房連結", "booking_id": "Booking ID",
     })
+
+
+def show_hotel_table(rows: list[dict]) -> None:
+    """顯示住宿表格；有 Booking 網址時直接提供可點擊的訂房按鈕。"""
+    frame = hotel_table(rows)
+    column_config = {}
+    if "Booking.com 訂房連結" in frame.columns:
+        column_config["Booking.com 訂房連結"] = st.column_config.LinkColumn(
+            "Booking.com 訂房連結", display_text="前往訂房"
+        )
+    st.dataframe(frame, hide_index=True, use_container_width=True,
+                 column_config=column_config)
 
 
 with st.sidebar:
@@ -72,7 +86,8 @@ tab_plan, tab_data, tab_knowledge, tab_model = st.tabs(["行程規劃", "資料�
 with tab_plan:
     with st.form("plan"):
         col1, col2, col3 = st.columns(3)
-        destination = col1.selectbox("目的地", DESTINATIONS)
+        destination = col1.text_input("目的地", value="台北", max_chars=80,
+                                      placeholder="例如：台北、巴黎 法國")
         start_date = col2.date_input("出發日期", value=date.today())
         days = col3.number_input("旅遊天數", min_value=1, max_value=14, value=3)
         people = col1.number_input("人數", min_value=1, max_value=20, value=2)
@@ -90,12 +105,19 @@ with tab_plan:
     if "plan_result" in st.session_state:
         result = st.session_state["plan_result"]
         st.info(result["data_notice"])
+        booking = result.get("booking", {})
+        if booking.get("available") and booking.get("count", 0) > 0:
+            st.success(booking.get("message", "已取得 Booking 房源"))
+        else:
+            st.warning(booking.get("message", "Booking 即時價格目前不可用"))
+        if result.get("booking_search_url"):
+            st.link_button("前往 Booking.com 查價與訂房", result["booking_search_url"], type="primary")
         st.subheader("每日行程")
         st.dataframe(pd.DataFrame(result["itinerary"]), hide_index=True, use_container_width=True)
         left, right = st.columns(2)
         with left:
             st.subheader("住宿推薦")
-            st.dataframe(hotel_table(result["hotels"]), hide_index=True, use_container_width=True)
+            show_hotel_table(result["hotels"])
             st.subheader("景點推薦")
             st.dataframe(pd.DataFrame(result["spots"]), hide_index=True, use_container_width=True)
         with right:
@@ -129,23 +151,32 @@ with tab_plan:
             st.json(result["rag_sources"])
 
 with tab_data:
-    st.write("分析 40 筆示範住宿的價格、評分、距離、房型與房間大小，並提供描述統計、房型分組與相關係數。")
-    analysis_options = ["全部目的地"] + DESTINATIONS
-    analytics_destination = st.selectbox("分析目的地", analysis_options,
-                                         index=analysis_options.index(destination),
-                                         key="analytics_destination")
+    st.write("直接輸入單一目的地；Booking API 啟用後每次最多分析 40 筆即時房源。")
+    analytics_destination = st.text_input("分析目的地", value="台北", max_chars=80,
+                                          placeholder="例如：大阪 日本", key="analytics_destination")
     if st.button("載入住宿統計"):
-        selected_destination = "" if analytics_destination == "全部目的地" else analytics_destination
-        data = request("GET", "/api/analytics", params={"destination": selected_destination})
+        checkout = start_date + timedelta(days=max(int(days) - 1, 1))
+        data = request("GET", "/api/analytics", params={
+            "destination": analytics_destination.strip(), "checkin": start_date.isoformat(),
+            "checkout": checkout.isoformat(), "people": int(people),
+        })
         if data:
+            booking = data.get("booking", {})
+            if booking.get("available") and booking.get("count", 0) > 0:
+                st.success(booking.get("message", "已取得 Booking 房源"))
+            else:
+                st.warning(booking.get("message", "Booking 即時價格目前不可用"))
+                if booking.get("search_url"):
+                    st.link_button("前往 Booking.com 查即時價格", booking["search_url"])
             if data["count"] == 0:
-                st.warning("所選目的地目前沒有住宿資料。")
+                st.warning("所輸入的目的地目前沒有可分析的住宿資料。")
             else:
                 metric_left, metric_right = st.columns(2)
                 metric_left.metric(f"{analytics_destination}住宿資料筆數", data["count"])
-                metric_right.metric("全部示範住宿筆數", data["total_count"])
-                st.dataframe(hotel_table(data["prices"]), hide_index=True, use_container_width=True)
-                st.bar_chart(pd.DataFrame(data["by_room_type"]).set_index("room_type")["mean_price"])
+                metric_right.metric("本次資料來源", data.get("source", "未知"))
+                show_hotel_table(data["prices"])
+                if data["by_room_type"]:
+                    st.bar_chart(pd.DataFrame(data["by_room_type"]).set_index("room_type")["mean_price"])
                 with st.expander("查看 describe / groupby / corr"):
                     st.write("描述統計（describe）", data["describe"])
                     st.write("依房型分組（groupby）", data["by_room_type"])

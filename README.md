@@ -1,8 +1,8 @@
 # TravelMate AI｜旅遊、住宿與消費決策助理
 
-可在無 API Key、無網路情況下執行核心行程規劃；CSV 住宿、景點與評論均為**示範資料**，金額為新台幣估算，沒有訂房與即時房價能力。目前支援台北、台中、高雄、東京、京都、大阪、札幌、首爾、釜山、新加坡共 10 個目的地，內建 40 筆住宿與 40 筆景點示範資料。
+目的地改為自由輸入。設定 Booking.com Demand API 官方憑證後，每個單一目的地最多取得 40 筆 Booking 即時房源、價格與訂房連結。未設定憑證時，網頁會提供 Booking.com 查價連結，資料分析則使用 40 筆明確標示「非 Booking 即時價」的教學延伸樣本。專案內建台北、台中、高雄、東京、京都、大阪、札幌、首爾、釜山、新加坡的景點與住宿教學種子資料。
 
-住宿推薦與資料分析同時顯示房間的平方公尺與約合坪數，換算使用 `1 坪 ≈ 3.3058 平方公尺`。資料分析預設只顯示目前選定目的地，也可手動切換「全部目的地」檢視 40 筆住宿。
+住宿推薦與資料分析在來源有提供時同時顯示房間的平方公尺與約合坪數，換算使用 `1 坪 ≈ 3.3058 平方公尺`。分析目的地也是自由輸入，一次專注一個目的地的 40 筆房源或教學樣本。
 
 ## 架構與資料流
 
@@ -24,7 +24,7 @@
 | NLP | 住宿示範評論 → 詞典情緒、優缺點摘要 → `services/nlp.py` → 網頁評論摘要 |
 | RAG | TXT/PDF/CSV/筆記 → 切塊、字元 TF-IDF embedding、cosine retriever → `rag/knowledge.py` → Agent 的有來源內容與 LLM |
 | Agent / Tools | 表單 → 主 Agent 決定工具 → `agents/travel_agent.py`、`tools/travel_tools.py` → 預算、住宿、知識與外部資料 |
-| 外部 API | 目的地與日期 → Open-Meteo、Frankfurter 並處理錯誤 → `services/external.py` → 網頁即時資訊或不可用提示 |
+| 外部 API | 目的地與日期 → Open-Meteo、公開匯率服務與 Booking Demand API，並處理錯誤 → `services/external.py`、`services/booking.py` → 即時資訊、Booking 房價或不可用提示 |
 | Database | 規劃結果 → SQLite 寫入與查詢 → `database/repository.py` → `/api/plans` |
 
 MCP 概念：`tools/travel_tools.py` 是穩定的工具介面，Agent 呼叫它們；若日後換成真正 MCP server/client，應在工具邊界加入 MCP adapter。本版本**沒有宣稱已實作 MCP 協定或 MCP server**。
@@ -55,6 +55,18 @@ py -m streamlit run frontend/app.py
 
 複製 `.env.example` 為 `.env`，可填 `OPENAI_API_KEY`；不填時仍可執行。勾選即時資料才呼叫外部天氣與匯率 API。日期若超出預報範圍會顯示不可用，不會捏造天氣。LLM 失敗會顯示規則式備援。上傳知識庫按隨機工作階段識別碼隔離，存在後端記憶體並於重啟或快取淘汰後消失；這不是登入機制，**仍勿上傳敏感筆記**。公開 API 的行程歷史查詢預設關閉；若在可信本機環境要開啟，設定 `ENABLE_HISTORY_API=1`。
 
+### Booking.com 即時價格與訂房
+
+Booking 官方 Demand API 只開放給 Managed Affiliate Partner。在 Booking Partner Centre 取得密鑰後，只在 Render 後端 Environment 設定，不可放到 Streamlit Secrets 或 GitHub：
+
+```text
+BOOKING_API_KEY=你的_Bearer_Token
+BOOKING_AFFILIATE_ID=你的_Affiliate_ID
+BOOKING_API_BASE=https://demandapi.booking.com/3.2
+```
+
+完成後 Render 會自動重新部署，`booking_tool` 會自動從教學備援切換到 Booking 即時價格。使用者會被導向 Booking.com 完成訂房，本專案不收集信用卡，也不直接建立訂單。參考 [Booking Demand API 身分驗證](https://developers.booking.com/demand/docs/development-guide/authentication) 與 [Accommodation 搜尋流程](https://developers.booking.com/demand/docs/accommodations/search-for-available-properties)。
+
 ## Git / GitHub
 
 `.env`、SQLite 和訓練模型已由 `.gitignore` 排除；`.env.example`、CSV 與內建知識文件需提交。自行建立 GitHub 空 repo 後，從 `TravelMate_AI` 執行：
@@ -75,7 +87,7 @@ git push -u origin main
 
 建議後端部署 Render，前端部署 Streamlit Community Cloud，兩者指向同一 GitHub repo：
 
-1. Render 建立 Python Web Service，root directory 留空（若上層目錄才是 repo 根則設 `TravelMate_AI`）；build `pip install -r requirements.txt`；start `uvicorn main:app --host 0.0.0.0 --port $PORT`；Python 設為 3.12。也可使用 `render.yaml` blueprint，其 `rootDir: .` 假設本目錄為 repo 根。選用 LLM 時在 Render Secrets/Environment 設 `OPENAI_API_KEY`。
+1. Render 建立 Python Web Service，root directory 留空（若上層目錄才是 repo 根則設 `TravelMate_AI`）；build `pip install -r requirements.txt`；start `uvicorn main:app --host 0.0.0.0 --port $PORT`；Python 設為 3.12。也可使用 `render.yaml` blueprint，其 `rootDir: .` 假設本目錄為 repo 根。選用 LLM 時設 `OPENAI_API_KEY`；啟用 Booking 即時價時再設 `BOOKING_API_KEY`與 `BOOKING_AFFILIATE_ID`。
 2. Streamlit Community Cloud 的 main file path 設 `TravelMate_AI/frontend/app.py`（若 repo 根是此目錄則 `frontend/app.py`）；Advanced settings 選 Python 3.12，Secrets 加入 `TRAVELMATE_API_URL = "https://你的後端.onrender.com"`。Streamlit 會尋找專案根 `requirements.txt`，若建立 repo 根在上層，建議改讓本目錄做 repo 根。前端與後端同時安裝完整依賴是較簡單、但較重的部署方式。
 3. 上線後測試 `/health`、表單、分析、模型與知識上傳。Render 免費服務閒置後會休眠，前端允許 90 秒等待首次喚醒。免費/無持久化磁碟的 SQLite、joblib 和上傳索引可能在重啟後消失；正式資料應改用託管資料庫及持久化儲存。不要在前端 Secrets 放後端的 LLM 金鑰。
 
@@ -85,6 +97,6 @@ git push -u origin main
 
 - 網頁連線失敗 → 前端 `frontend/app.py` 的 `request` → 後端未啟動或 URL 不對 → 啟動 uvicorn／修正 `TRAVELMATE_API_URL`。
 - 模型載入失敗 → 模型 `models/price_model.py` 的 `load_or_train` → joblib 檔與目前版本不相容 → 刪除已產生的模型快取再訓練（勿刪 CSV）。
-- 空景點 → 資料層 `services/analytics.py` 的 `spots` → 目的地不在示範 CSV → 增加對應資料及 UI 選項。
+- 空景點 → 資料層 `services/analytics.py` 的 `spots` → 自由輸入的目的地不在示範 CSV → 行程改用「自由探索」，或再增加該地景點資料。
 
 此專案的 ML 與 NLP 是教學基線；稀疏 TF-IDF 不是神經語意 embedding，統計指標也不能代表真實旅宿市場表現。

@@ -39,8 +39,11 @@ def _fallback(facts: dict) -> str:
     if notes:
         excerpt = str(notes[0].get("text", ""))[:120]
         rag_text = f"知識庫提示：{excerpt}"
-    return " ".join(item for item in [budget_text, hotel_text, preference_text, weather_text, rag_text,
-                     "住宿與景點為示範資料，預訂前請核對即時價格與營業資訊。"] if item)
+    source_text = ("住宿價格來自 Booking.com Demand API，完成預訂前仍須在 Booking.com 核對稅費與可訂性；景點為示範資料。"
+                   if facts.get("booking_available") else
+                   "住宿與景點為示範資料，預訂前請核對即時價格與營業資訊。")
+    return " ".join(item for item in [budget_text, hotel_text, preference_text, weather_text,
+                                      rag_text, source_text] if item)
 
 
 def advice(facts: dict) -> dict:

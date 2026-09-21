@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from services.analytics import spots
 from services.llm import advice
 from services.nlp import analyze_reviews
-from tools.travel_tools import budget_tool, currency_tool, hotel_tool, rag_tool, weather_tool
+from tools.travel_tools import booking_tool, budget_tool, currency_tool, hotel_tool, rag_tool, weather_tool
 
 CURRENCIES = {
     "台北": "TWD", "台中": "TWD", "高雄": "TWD",
@@ -17,10 +17,16 @@ def plan(request: dict) -> dict:
     destination = request["destination"]
     days, people, budget = request["days"], request["people"], request["budget_twd"]
     selected_spots = spots(destination, request["preference"])
+    booking = booking_tool(destination, request["start_date"], days, people)
     # 為餐食、交通與景點保留一半預算，按房間數分配住宿上限。
     nights = max(days - 1, 1)
     max_nightly = budget * 0.5 / nights / ((people + 1) // 2)
-    hotels = hotel_tool(destination, max_nightly)
+    booking_hotels = [item for item in booking["hotels"] if item.get("price") is not None]
+    hotels = [item for item in booking_hotels if item["price"] <= max_nightly][:4]
+    if booking_hotels and not hotels:
+        hotels = sorted(booking_hotels, key=lambda item: item["price"])[:4]
+    if not hotels:
+        hotels = hotel_tool(destination, max_nightly)
     if not hotels:
         # 預算內沒有資料時改以最低價格優先，避免備援反而選到最昂貴住宿。
         hotels = sorted(hotel_tool(destination, float("inf")), key=lambda item: (item["price"], -item["rating"]))
@@ -39,9 +45,15 @@ def plan(request: dict) -> dict:
     # 天氣與匯率為可選外部呼叫；失敗要明示，不影響核心規劃。
     external = {}
     if request.get("use_live_api", False):
+        def destination_currency():
+            quote = CURRENCIES.get(destination)
+            if quote is None:
+                raise ValueError("自訂目的地尚未建立當地幣別對照")
+            return currency_tool("TWD", quote)
+
         for name, call in {
             "weather": lambda: weather_tool(destination, request["start_date"]),
-            "currency": lambda: currency_tool("TWD", CURRENCIES.get(destination, "TWD")),
+            "currency": destination_currency,
         }.items():
             try:
                 external[name] = call()
@@ -49,10 +61,14 @@ def plan(request: dict) -> dict:
                 external[name] = {"available": False, "message": str(exc)}
     reviews = analyze_reviews(destination)
     facts = {"destination": destination, "days": days, "preference": request["preference"],
-             "spending": spending, "hotel": chosen, "external": external, "notes": notes}
+             "spending": spending, "hotel": chosen, "external": external, "notes": notes,
+             "booking_available": bool(booking["available"] and booking_hotels)}
+    notice = ("住宿價格來自 Booking.com Demand API；實際總額、稅費與可訂性以 Booking 確認頁為準。"
+              if booking["available"] and booking_hotels else
+              "Booking API 憑證尚未設定；住宿與景點為示範資料，請使用 Booking 連結查即時價格。")
     return {"destination": destination, "itinerary": itinerary, "hotels": hotels,
             "spots": selected_spots, "spending": spending, "reviews": reviews,
             "rag_sources": notes, "external": external, "advice": advice(facts),
-            "data_notice": "住宿、景點與評論為示範資料；價格均為新台幣估算，非即時房價或訂房服務。",
-            "tool_trace": ["hotel_tool", "budget_tool", "rag_tool"] +
+            "booking": booking, "booking_search_url": booking["search_url"], "data_notice": notice,
+            "tool_trace": ["booking_tool", "hotel_tool", "budget_tool", "rag_tool"] +
                           (["weather_tool", "currency_tool"] if request.get("use_live_api") else [])}
