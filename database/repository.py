@@ -22,11 +22,14 @@ def connect():
 
 
 def save_plan(request: dict, result: dict) -> int:
+    # Google Places 地點／評分不得寫進 SQLite；只保存本次請求及無地點的摘要。
+    stored_result = ({"spot_source": "Google Maps", "note": "Google Places 即時內容未儲存"}
+                     if result.get("spot_source") == "Google Maps" else result)
     with connect() as connection:
         cursor = connection.execute(
             "INSERT INTO plans(created_at,destination,request_json,result_json) VALUES (?,?,?,?)",
             (datetime.now(timezone.utc).isoformat(), request["destination"],
-             json.dumps(request, ensure_ascii=False), json.dumps(result, ensure_ascii=False)),
+             json.dumps(request, ensure_ascii=False), json.dumps(stored_result, ensure_ascii=False)),
         )
         return int(cursor.lastrowid)
 

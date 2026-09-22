@@ -4,7 +4,8 @@
 
 ## 目前功能與資料可信度
 
-- 行程與住宿名稱：使用者搜尋時向 OpenStreetMap 查詢，顯示地圖來源連結；不保證開放、可訂或適合特定日期。公開地點搜尋採一小時快取與每秒至多一次呼叫；若暫時失敗，頁面顯示錯誤，不產生虛構地點。國名輸入以首都周邊代表，並明示範圍。
+- 景點：設定 `GOOGLE_PLACES_API_KEY` 並在 Google Cloud 啟用 Places API (New) 及計費後，以 Google Text Search 取得即時星等、評論數和地圖連結。排名使用評論數平滑後的評分、偏好加權，且公園最多兩筆；Google 地點資料不寫入 SQLite、也不轉送 LLM。未設定或查詢失敗時改用沒有 Google 評分的 OpenStreetMap 多種類景點備援，絕不冒稱 Google 評分。[Google Maps 資料使用政策](https://developers.google.com/maps/documentation/places/web-service/policies)另有限制與標示要求。
+- 住宿名稱：使用者搜尋時向 OpenStreetMap 查詢，顯示地圖來源連結；不保證開放、可訂或適合特定日期。公開地點搜尋採一小時快取與每秒至多一次呼叫；若暫時失敗，頁面顯示錯誤，不產生虛構地點。國名輸入以首都周邊代表，並明示範圍。
 - 景點活動：依地點類型提出「參觀展覽／觀景」等建議；不是已核實的預約活動。門票僅當 OSM 明確標示免門票才列 0 元，其餘待查。
 - 住宿價格：只有設定 Booking.com Demand API 官方 `BOOKING_API_KEY` 和 `BOOKING_AFFILIATE_ID` 後，才可取得最多 40 筆查詢日期房源與價格。沒有憑證時只顯示真實住宿名稱和 Booking 搜尋入口，房價待查。預訂前須核對稅費、房型、可訂性。公開地圖名稱與 Booking 搜尋結果不保證逐筆一致。
 - 預算：餐食每人每日 900 元、當地交通 350 元為明示估算。缺房價或門票時只顯示已知／估算小計，不宣稱完整總額或剩餘預算。Booking 搜尋價為整團房數的每晚價，不再重複乘房數。不含機票及跨城交通。
@@ -37,10 +38,12 @@ python -m uvicorn main:app --reload --port 8000
 ## Render + Streamlit Community Cloud
 
 1. 將程式提交至 GitHub。`.env`、資料庫、模型輸出及 `.venv` 不可上傳；`.env.example` 可以上傳。
-2. Render Web Service：Python 3.12，build `pip install -r requirements.txt`，start `uvicorn main:app --host 0.0.0.0 --port $PORT`。本 repo 亦提供 `render.yaml`。在 Render Environment 設 `OPENAI_API_KEY`；若有 Booking 官方合作憑證再設 `BOOKING_API_KEY` 和 `BOOKING_AFFILIATE_ID`。重新部署後用 `/api/ai/status` 檢查 `configured`，再產生一次行程確認實際 `connected`。
+2. Render Web Service：Python 3.12，build `pip install -r requirements.txt`，start `uvicorn main:app --host 0.0.0.0 --port $PORT`。本 repo 亦提供 `render.yaml`。在 Render Environment 設 `GOOGLE_PLACES_API_KEY`（Google Cloud 需先啟用 Places API New 與計費），可選 `OPENAI_API_KEY`；若有 Booking 官方合作憑證再設 `BOOKING_API_KEY` 和 `BOOKING_AFFILIATE_ID`。重新部署後用 `/api/ai/status` 檢查 AI `configured`，再產生一次行程確認實際 `connected`。
 3. Streamlit Community Cloud：入口 `frontend/app.py`，Python 3.12；Secrets 設 `TRAVELMATE_API_URL = "https://你的-Render-網址.onrender.com"`。**不要**把後端金鑰放 Streamlit Secrets 或 GitHub。
 4. 部署檢查：`/health` 為 `ok`、`/api/ai/status` 狀態符合設定；台北及肯亞行程可顯示地點來源；未知價格是「待查」；Booking 查價連結有效；知識庫及模型頁可操作。
 
 ## 外部服務限制
 
 本專案使用 [OpenStreetMap Nominatim 公開服務](https://operations.osmfoundation.org/policies/nominatim/) 做低流量、使用者觸發的地點查詢，需顯示來源並受用量限制；流量增長時應改為自架或正式商用地點 API。Booking 即時價格需要 [Booking.com Demand API 官方權限](https://developers.booking.com/demand/docs/development-guide/authentication)。AI 呼叫使用 [OpenAI Responses API](https://developers.openai.com/api/reference/cli/resources/responses/methods/create)。
+
+網站亦提供 [使用條款](TERMS.md) 與 [隱私說明](PRIVACY.md)。Google Places 的評分欄位涉及計費級別，請先確認 [官方計費規則](https://developers.google.com/maps/documentation/places/web-service/usage-and-billing) 再設定金鑰。

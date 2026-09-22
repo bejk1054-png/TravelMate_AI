@@ -9,14 +9,14 @@ def weather_tool(destination: str, date: str) -> dict:
     return weather(destination, date)
 
 
-def hotel_tool(destination: str, preference: str = "") -> list[dict]:
+def hotel_tool(destination: str, preference: str = "", place_data: dict | None = None) -> list[dict]:
     """單一動作：從公開地圖取得真實住宿名稱，價格一律待查。"""
-    return places(destination, preference)["hotels"]
+    return (place_data or places(destination, preference))["hotels"]
 
 
-def spot_tool(destination: str, preference: str = "") -> list[dict]:
+def spot_tool(destination: str, preference: str = "", place_data: dict | None = None) -> list[dict]:
     """單一動作：從公開地圖取得真實景點名稱與門票標記。"""
-    return places(destination, preference)["spots"]
+    return (place_data or places(destination, preference))["spots"]
 
 
 def booking_tool(destination: str, start_date: str, days: int, people: int) -> dict:

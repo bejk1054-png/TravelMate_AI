@@ -16,6 +16,7 @@ client = TestClient(app)
 
 def _fake_places(destination, preference=""):
     return {"area": destination, "capital_fallback": False,
+            "spot_source": "OpenStreetMap", "spot_message": "無 Google 評分",
             "hotels": [{"name": "實際測試飯店", "price": None, "currency": None,
                         "map_url": "https://www.openstreetmap.org/node/1"}],
             "spots": [{"name": "實際測試景點", "activity": "參觀", "cost_twd_per_person": None,

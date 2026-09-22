@@ -11,3 +11,5 @@ services:
         value: 3.12.11
       - key: OPENAI_API_KEY
         sync: false
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false

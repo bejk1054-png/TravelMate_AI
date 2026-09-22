@@ -6,6 +6,7 @@ import time
 import httpx
 
 from services.location import LocationServiceError, country_capital, split_city_country
+from services.google_places import GooglePlacesError, configured, search_spots
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "TravelMateAI/1.0 (travel planning; https://github.com/bejk1054-png/TravelMate_AI)"
@@ -62,18 +63,30 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
                        "currency": None, "price_source": "房價待查；名稱來自 OpenStreetMap",
                        "booking_url": None, "map_url": _link(item), "rating": None,
                        "room_type": "待查", "room_size": None})
-    search_term = {"文化": "museums", "自然": "parks", "美食": "restaurants",
-                   "地標": "attractions"}.get(preference, "attractions")
-    for item in _search(f"{search_term} in {area}"):
+    search_term = {"文化": "museums", "自然": "parks", "美食": "markets",
+                   "地標": "landmarks"}.get(preference)
+    queries = []
+    if search_term:
+        queries.append(f"{search_term} in {area}")
+    queries.append(f"attractions in {area}")
+    candidates = []
+    for query in queries:
+        candidates.extend(_search(query))
+    category_counts, seen = {}, set()
+    for item in candidates:
         if item.get("type") not in {"attraction", "museum", "gallery", "viewpoint",
                                      "monument", "park", "memorial", "castle", "zoo",
                                      "restaurant", "marketplace"}:
             continue
         name = str(item.get("name") or "").strip()
-        if not name or not item.get("osm_id"):
+        if not name or not item.get("osm_id") or item["osm_id"] in seen:
             continue
+        seen.add(item["osm_id"])
         tags = item.get("extratags") or {}
         category = item.get("type")
+        if category_counts.get(category, 0) >= (2 if category == "park" else 4):
+            continue
+        category_counts[category] = category_counts.get(category, 0) + 1
         activity = {"museum": "參觀展覽", "gallery": "參觀藝廊", "viewpoint": "觀景",
                     "park": "公園散步", "monument": "參觀紀念地標", "castle": "參觀古蹟",
                     "zoo": "參觀動物園", "restaurant": "品嚐餐點",
@@ -82,10 +95,26 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
         spots.append({"name": name, "activity": activity, "category": category,
                       "cost_twd_per_person": 0 if free else None,
                       "fee_note": "OSM 標示免門票；現場確認" if free else "門票／活動費待查",
-                      "map_url": _link(item)})
+                      "map_url": _link(item), "rating": None, "rating_count": None,
+                      "rating_source": None})
     return {"hotels": hotels[:10], "spots": spots[:10], "area": area,
             "capital_fallback": capital_fallback}
 
 
 def places(destination: str, preference: str = "") -> dict:
-    return _cached_places(destination.strip(), preference.strip(), int(time.time() // 3600))
+    destination, preference = destination.strip(), preference.strip()
+    result = _cached_places(destination, preference, int(time.time() // 3600)).copy()
+    result["spot_source"] = "OpenStreetMap"
+    result["spot_message"] = "未設定 Google Places API 金鑰；目前景點沒有 Google 評分。"
+    if configured():
+        try:
+            google_spots = search_spots(result["area"], preference)
+            if google_spots:
+                result["spots"] = google_spots
+                result["spot_source"] = "Google Maps"
+                result["spot_message"] = "依 Google Maps 星等與評論數排序；自然／公園類最多兩筆。"
+            else:
+                result["spot_message"] = "Google 查無有評分的景點；改用無 Google 評分的 OpenStreetMap 地點。"
+        except GooglePlacesError as exc:
+            result["spot_message"] = f"{exc}；改用無 Google 評分的 OpenStreetMap 地點。"
+    return result

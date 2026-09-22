@@ -12,7 +12,7 @@ from pathlib import Path
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 st.set_page_config(page_title="TravelMate AI", page_icon="🧭", layout="wide")
 st.title("🧭 TravelMate AI｜旅遊、住宿與消費決策助理")
-st.caption("實際地點取自公開地圖；Booking 官方憑證啟用後才顯示查詢日期房價。未知費用會標示待查。")
+st.caption("有 Google Places 金鑰時依 Google Maps 評分推薦景點；住宿房價須 Booking 官方憑證。未知費用標示待查。")
 SQM_PER_PING = 3.305785
 if "rag_session_id" not in st.session_state:
     st.session_state["rag_session_id"] = str(uuid4())
@@ -87,6 +87,8 @@ with st.sidebar:
     ai = request("GET", "/api/ai/status") if health else None
     if ai:
         (st.success if ai["configured"] else st.warning)(ai["message"])
+    st.markdown("[使用條款](https://github.com/bejk1054-png/TravelMate_AI/blob/main/TERMS.md) · "
+                "[隱私說明](https://github.com/bejk1054-png/TravelMate_AI/blob/main/PRIVACY.md)")
 
 tab_plan, tab_knowledge, tab_model = st.tabs(["行程規劃", "旅遊知識庫", "價格模型"])
 with tab_plan:
@@ -111,6 +113,10 @@ with tab_plan:
     if "plan_result" in st.session_state:
         result = st.session_state["plan_result"]
         st.info(result["data_notice"])
+        if result.get("spot_source") == "Google Maps":
+            st.caption("景點及評分來源：Google Maps。評分為使用者平均分數；排序兼顧評論數，公園最多兩筆。")
+        else:
+            st.warning(result.get("spot_message", "目前無法取得 Google Maps 評分。"))
         for warning in result.get("warnings", []):
             st.warning(warning)
         booking = result.get("booking", {})
@@ -121,9 +127,12 @@ with tab_plan:
         if result.get("booking_search_url"):
             st.link_button("前往 Booking.com 查價與訂房", result["booking_search_url"], type="primary")
         st.subheader("每日行程")
+        if result.get("spot_source") == "Google Maps":
+            st.caption("景點名稱與 Google 評分：Google Maps（非住宿來源）。")
         itinerary = pd.DataFrame(result["itinerary"]).rename(columns={
             "day": "天數", "date": "日期", "spot": "實際景點", "activity": "建議活動",
-            "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源"})
+            "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源",
+            "rating": "Google 評分", "rating_count": "評論數"})
         st.dataframe(itinerary, hide_index=True, use_container_width=True,
                      column_config={"地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看地點")})
         left, right = st.columns(2)
@@ -135,11 +144,23 @@ with tab_plan:
                 st.warning("暫時查不到可核實的住宿名稱；請使用 Booking 搜尋連結。")
             st.subheader("景點推薦")
             if result["spots"]:
-                spots_frame = pd.DataFrame(result["spots"]).rename(columns={
+                if result.get("spot_source") == "Google Maps":
+                    st.caption("景點名稱、星等與評論數：Google Maps；點地圖來源查最新資訊。")
+                spots_frame = pd.DataFrame(result["spots"]).drop(columns=["attributions"], errors="ignore").rename(columns={
                     "name": "景點", "activity": "建議活動", "category": "類型",
-                    "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源"})
+                    "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源",
+                    "rating": "Google 評分", "rating_count": "評論數", "rating_source": "評分來源"})
                 st.dataframe(spots_frame, hide_index=True, use_container_width=True,
                              column_config={"地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看地點")})
+                if result.get("spot_source") == "Google Maps":
+                    providers = {(item.get("provider"), item.get("providerUri"))
+                                 for spot in result["spots"] for item in spot.get("attributions", [])
+                                 if item.get("provider")}
+                    for provider, provider_uri in sorted(providers, key=lambda item: (item[0], str(item[1]))):
+                        if provider_uri and provider_uri.startswith("https://"):
+                            st.link_button(f"資料提供者：{provider}", provider_uri)
+                        else:
+                            st.caption(f"資料提供者：{provider}")
             else:
                 st.warning("暫時查不到可核實的景點資料。")
         with right:
