@@ -36,6 +36,7 @@ def test_health_and_plan(monkeypatch):
     assert body["tool_trace"] == ["booking_tool", "spot_tool", "hotel_tool", "budget_tool", "rag_tool"]
     assert body["spending"]["total"] is None
     assert body["advice"]["status"] == "unconfigured"
+    assert "reviews" not in body  # 教學評論不可冒稱為真實住宿評論
     assert body["booking_search_url"].startswith("https://www.booking.com/")
     assert client.get("/api/plans").status_code == 403
 

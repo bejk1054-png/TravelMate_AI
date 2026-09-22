@@ -2,7 +2,6 @@
 from datetime import date, timedelta
 
 from services.llm import advice
-from services.nlp import analyze_reviews
 from services.places import PlaceServiceError, places
 from tools.travel_tools import (booking_tool, budget_tool, currency_tool, hotel_tool,
                                 rag_tool, spot_tool, weather_tool)
@@ -49,7 +48,6 @@ def plan(request: dict) -> dict:
                 external[name] = call()
             except (RuntimeError, ValueError, KeyError) as exc:
                 external[name] = {"available": False, "message": str(exc)}
-    reviews = analyze_reviews(destination)
     facts = {"destination": destination, "days": days, "preference": request["preference"],
              "spending": spending, "hotel": chosen, "spots": itinerary,
              "external": external, "notes": notes, "booking_available": bool(priced)}
@@ -58,7 +56,7 @@ def plan(request: dict) -> dict:
     notice += " 景點名稱來自 OpenStreetMap；門票與活動費未標示者待查，營業時間請向景點確認。"
     return {"destination": destination, "area": place_data["area"], "itinerary": itinerary,
             "hotels": hotels, "spots": selected_spots[:10], "spending": spending,
-            "reviews": reviews, "rag_sources": notes, "external": external,
+            "rag_sources": notes, "external": external,
             "advice": advice(facts), "booking": booking,
             "booking_search_url": booking["search_url"], "data_notice": notice,
             "warnings": warnings,

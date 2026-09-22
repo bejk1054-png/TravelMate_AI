@@ -24,16 +24,6 @@ def hotels() -> pd.DataFrame:
     return frame.loc[frame.price.gt(0) & frame.rating.between(0, 5)].copy()
 
 
-def spots(destination: str, preference: str = "") -> list[dict]:
-    frame = pd.read_csv(DATA_DIR / "spots.csv")
-    frame = frame.loc[frame.destination.eq(destination)].copy()
-    if preference:
-        # 偏好只影響排序，不丟棄其他景點。
-        frame["match"] = frame.category.map(lambda item: int(item in preference))
-        frame = frame.sort_values("match", ascending=False, kind="stable")
-    return frame.drop(columns=["match"], errors="ignore").to_dict("records")
-
-
 def recommend_hotels(destination: str, max_nightly: float) -> list[dict]:
     frame = hotels().loc[lambda df: df.destination.eq(destination) & df.price.le(max_nightly)]
     frame = frame.sort_values(["rating", "price", "distance"], ascending=[False, True, True])

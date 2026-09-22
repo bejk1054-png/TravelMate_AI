@@ -11,6 +11,7 @@
 - AI 建議：Render 設定 `OPENAI_API_KEY` 後使用 OpenAI Responses API；行程結果會標明 `connected`。未設定或請求失敗時明示「規則式備援（非 AI）」。私人上傳筆記不送至 OpenAI。
 - 旅遊知識庫：PDF／TXT／CSV 上傳後暫存在後端記憶體，供 RAG 檢索；重啟後消失，請勿上傳敏感資料。
 - 價格模型：以合成教學資料訓練 RandomForest，與真實 Booking 價格完全分離，不能用來查實際房價。
+- NLP 評論分析程式保留作離線教學，但示範評論並非上述真實飯店的住客評論，因此不在即時行程中呈現。
 - 已移除重複且會顯示合成住宿的「資料分析」頁與 `/api/analytics`。Pandas／NumPy 分析程式保留供模型教學，不進入訂房推薦。
 
 ## 資料流
