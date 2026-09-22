@@ -1,7 +1,7 @@
 """Streamlit 前端：僅以 HTTP 呼叫後端，不直接讀取資料庫與金鑰。"""
 import os
 from uuid import uuid4
-from datetime import date, timedelta
+from datetime import date
 
 import httpx
 import pandas as pd
@@ -12,7 +12,7 @@ from pathlib import Path
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 st.set_page_config(page_title="TravelMate AI", page_icon="🧭", layout="wide")
 st.title("🧭 TravelMate AI｜旅遊、住宿與消費決策助理")
-st.caption("Booking 憑證啟用後可取得即時房源；所有訂房均跳轉 Booking.com 確認。")
+st.caption("實際地點取自公開地圖；Booking 官方憑證啟用後才顯示查詢日期房價。未知費用會標示待查。")
 SQM_PER_PING = 3.305785
 if "rag_session_id" not in st.session_state:
     st.session_state["rag_session_id"] = str(uuid4())
@@ -58,6 +58,7 @@ def hotel_table(rows: list[dict]) -> pd.DataFrame:
         "room_size": "房間大小（平方公尺）", "room_size_ping": "約合坪數",
         "stars": "星級", "season": "季節級別",
         "booking_url": "Booking.com 訂房連結", "booking_id": "Booking ID",
+        "map_url": "地圖來源",
     })
 
 
@@ -69,6 +70,8 @@ def show_hotel_table(rows: list[dict]) -> None:
         column_config["Booking.com 訂房連結"] = st.column_config.LinkColumn(
             "Booking.com 訂房連結", display_text="前往訂房"
         )
+    if "地圖來源" in frame.columns:
+        column_config["地圖來源"] = st.column_config.LinkColumn("地圖來源", display_text="查看地點")
     st.dataframe(frame, hide_index=True, use_container_width=True,
                  column_config=column_config)
 
@@ -81,8 +84,11 @@ with st.sidebar:
     else:
         st.warning("尚未連線")
     st.caption(api_url())
+    ai = request("GET", "/api/ai/status") if health else None
+    if ai:
+        (st.success if ai["configured"] else st.warning)(ai["message"])
 
-tab_plan, tab_data, tab_knowledge, tab_model = st.tabs(["行程規劃", "資料分析", "旅遊知識庫", "價格模型"])
+tab_plan, tab_knowledge, tab_model = st.tabs(["行程規劃", "旅遊知識庫", "價格模型"])
 with tab_plan:
     with st.form("plan"):
         col1, col2, col3 = st.columns(3)
@@ -105,6 +111,8 @@ with tab_plan:
     if "plan_result" in st.session_state:
         result = st.session_state["plan_result"]
         st.info(result["data_notice"])
+        for warning in result.get("warnings", []):
+            st.warning(warning)
         booking = result.get("booking", {})
         if booking.get("available") and booking.get("count", 0) > 0:
             st.success(booking.get("message", "已取得 Booking 房源"))
@@ -113,24 +121,46 @@ with tab_plan:
         if result.get("booking_search_url"):
             st.link_button("前往 Booking.com 查價與訂房", result["booking_search_url"], type="primary")
         st.subheader("每日行程")
-        st.dataframe(pd.DataFrame(result["itinerary"]), hide_index=True, use_container_width=True)
+        itinerary = pd.DataFrame(result["itinerary"]).rename(columns={
+            "day": "天數", "date": "日期", "spot": "實際景點", "activity": "建議活動",
+            "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源"})
+        st.dataframe(itinerary, hide_index=True, use_container_width=True,
+                     column_config={"地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看地點")})
         left, right = st.columns(2)
         with left:
             st.subheader("住宿推薦")
-            show_hotel_table(result["hotels"])
+            if result["hotels"]:
+                show_hotel_table(result["hotels"])
+            else:
+                st.warning("暫時查不到可核實的住宿名稱；請使用 Booking 搜尋連結。")
             st.subheader("景點推薦")
-            st.dataframe(pd.DataFrame(result["spots"]), hide_index=True, use_container_width=True)
+            if result["spots"]:
+                spots_frame = pd.DataFrame(result["spots"]).rename(columns={
+                    "name": "景點", "activity": "建議活動", "category": "類型",
+                    "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源"})
+                st.dataframe(spots_frame, hide_index=True, use_container_width=True,
+                             column_config={"地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看地點")})
+            else:
+                st.warning("暫時查不到可核實的景點資料。")
         with right:
             spending = result["spending"]
             st.subheader("每日預算與消費分析")
-            st.metric("每日估算（TWD）", f"{spending['daily']:,.0f}")
-            st.metric("總額 / 剩餘（TWD）", f"{spending['total']:,.0f} / {spending['remaining']:,.0f}")
-            st.bar_chart(pd.Series(spending["components"], name="TWD"))
+            if spending["total"] is None:
+                st.metric("已知與估算支出（非完整總額）", f"{spending['known_subtotal']:,.0f} TWD 起")
+                st.warning("尚缺「" + "、".join(spending["unknown_costs"]) + "」費用；不能判定剩餘預算。")
+            else:
+                st.metric("每日估算（TWD）", f"{spending['daily']:,.0f}")
+                st.metric("總額 / 剩餘（TWD）", f"{spending['total']:,.0f} / {spending['remaining']:,.0f}")
+            st.bar_chart(pd.Series({key: value for key, value in spending["components"].items()
+                                    if value is not None}, name="TWD"))
             st.caption(spending["assumptions"])
             st.subheader("AI 建議")
+            if result["advice"].get("status") != "connected":
+                st.warning("目前未取得 AI 回覆；以下為非 AI 的規則式建議。請在 Render 設定 OPENAI_API_KEY。")
             st.write(result["advice"]["text"])
             st.caption(result["advice"]["source"])
-            st.write("評論摘要：", result["reviews"]["summary"])
+            if result["advice"].get("message"):
+                st.caption(result["advice"]["message"])
             external = result["external"]
             if external:
                 st.subheader("即時資訊")
@@ -149,38 +179,6 @@ with tab_plan:
         with st.expander("查看 Agent 工具與 RAG 來源"):
             st.write("工具：", " → ".join(result["tool_trace"]))
             st.json(result["rag_sources"])
-
-with tab_data:
-    st.write("直接輸入單一目的地；Booking API 啟用後每次最多分析 40 筆即時房源。")
-    analytics_destination = st.text_input("分析目的地", value="台北", max_chars=80,
-                                          placeholder="例如：大阪 日本", key="analytics_destination")
-    if st.button("載入住宿統計"):
-        checkout = start_date + timedelta(days=max(int(days) - 1, 1))
-        data = request("GET", "/api/analytics", params={
-            "destination": analytics_destination.strip(), "checkin": start_date.isoformat(),
-            "checkout": checkout.isoformat(), "people": int(people),
-        })
-        if data:
-            booking = data.get("booking", {})
-            if booking.get("available") and booking.get("count", 0) > 0:
-                st.success(booking.get("message", "已取得 Booking 房源"))
-            else:
-                st.warning(booking.get("message", "Booking 即時價格目前不可用"))
-                if booking.get("search_url"):
-                    st.link_button("前往 Booking.com 查即時價格", booking["search_url"])
-            if data["count"] == 0:
-                st.warning("所輸入的目的地目前沒有可分析的住宿資料。")
-            else:
-                metric_left, metric_right = st.columns(2)
-                metric_left.metric(f"{analytics_destination}住宿資料筆數", data["count"])
-                metric_right.metric("本次資料來源", data.get("source", "未知"))
-                show_hotel_table(data["prices"])
-                if data["by_room_type"]:
-                    st.bar_chart(pd.DataFrame(data["by_room_type"]).set_index("room_type")["mean_price"])
-                with st.expander("查看 describe / groupby / corr"):
-                    st.write("描述統計（describe）", data["describe"])
-                    st.write("依房型分組（groupby）", data["by_room_type"])
-                    st.write("數值相關係數（corr）", data["correlation"])
 
 with tab_knowledge:
     st.write("上傳 PDF、TXT、CSV 或個人旅遊筆記，系統會切分內容並建立暫存 RAG 檢索索引。")

@@ -1,76 +1,72 @@
-"""可選 LLM 整合；無金鑰時返回可驗證的規則式摘要。"""
+"""OpenAI Responses API；未配置或呼叫失敗時明示狀態，不冒稱 AI 已連線。"""
+import json
+
 import httpx
 
 from utils.config import secret
 
 
+def ai_status() -> dict:
+    """只回報是否配置金鑰，不暴露金鑰內容。"""
+    configured = bool(secret("OPENAI_API_KEY"))
+    return {"configured": configured,
+            "message": "已設定 AI 金鑰；實際連線結果以產生行程後為準。" if configured else
+                       "尚未在 Render 設定 OPENAI_API_KEY；目前只能使用規則式建議。"}
+
+
 def _fallback(facts: dict) -> str:
-    """即使未設定 LLM，也依本次行程資料產生具體且可驗證的建議。"""
     spending = facts["spending"]
-    total = spending["total"]
-    budget = total + spending["remaining"]
-    destination = facts["destination"]
-    preference = facts["preference"]
-    days = facts["days"]
-    if spending["within_budget"]:
-        budget_text = (f"{destination}{days}日行程預估共 {total:,.0f} 元，"
-                       f"在 {budget:,.0f} 元預算內，約可保留 {spending['remaining']:,.0f} 元彈性。")
-    else:
-        over = abs(spending["remaining"])
-        largest = max(spending["components"], key=spending["components"].get)
-        budget_text = (f"{destination}{days}日行程預估共 {total:,.0f} 元，超出預算 {over:,.0f} 元；"
-                       f"最大支出是{largest}，建議先從此項降低至少 {over:,.0f} 元。")
-
     hotel = facts.get("hotel")
-    hotel_text = (f"目前住宿基準為「{hotel['name']}」每晚約 {hotel['price']:,.0f} 元。"
-                  if hotel else "目前沒有符合條件的住宿資料，請另行查價。")
-    preference_text = f"景點已依「{preference}」偏好優先排序。"
-
+    area = facts["destination"]
+    parts = [f"{area} {facts['days']} 日行程：已列出真實地點名稱，但須核對開放時間與交通動線。"]
+    if hotel:
+        if hotel.get("price") is None:
+            parts.append(f"「{hotel['name']}」有地圖資料，但房價待查；請到 Booking 輸入入住日期核價。")
+        else:
+            parts.append(f"「{hotel['name']}」查詢時每晚約 {hotel['price']:,.0f} 元；預訂前再確認稅費與房型。")
+    else:
+        parts.append("目前查不到可核實的住宿名稱，請先到 Booking 搜尋目的地。")
+    if spending["total"] is None:
+        missing = "、".join(spending["unknown_costs"])
+        parts.append(f"已知與估算支出至少 {spending['known_subtotal']:,.0f} 元；{missing}待查，不能判定是否超過預算。")
+    else:
+        parts.append(f"完整估算 {spending['total']:,.0f} 元；"
+                     f"{'預算內' if spending['within_budget'] else '超出預算'}，"
+                     f"差額 {abs(spending['remaining']):,.0f} 元。")
     weather = (facts.get("external") or {}).get("weather")
     if weather and weather.get("available"):
-        weather_text = (f"出發日預報 {weather['min_c']}–{weather['max_c']}°C，"
-                        f"最高降雨機率 {weather['rain_probability']}%，請依天氣準備。")
-    elif weather:
-        weather_text = f"天氣資訊目前不可用：{weather.get('message', '未知原因')}。"
-    else:
-        weather_text = "未啟用即時天氣；出發前請再次確認預報。"
-    notes = facts.get("notes") or []
-    rag_text = ""
-    if notes:
-        excerpt = str(notes[0].get("text", ""))[:120]
-        rag_text = f"知識庫提示：{excerpt}"
-    source_text = ("住宿價格來自 Booking.com Demand API，完成預訂前仍須在 Booking.com 核對稅費與可訂性；景點為示範資料。"
-                   if facts.get("booking_available") else
-                   "住宿與景點為示範資料，預訂前請核對即時價格與營業資訊。")
-    return " ".join(item for item in [budget_text, hotel_text, preference_text, weather_text,
-                                      rag_text, source_text] if item)
+        parts.append(f"出發日預報 {weather['min_c']}–{weather['max_c']}°C，請依天氣調整。")
+    return " ".join(parts)
 
 
 def advice(facts: dict) -> dict:
     fallback = _fallback(facts)
     key = secret("OPENAI_API_KEY")
     if not key:
-        return {"text": fallback, "source": "個人化規則式建議（未設定 LLM 金鑰）"}
-    # 只傳送結構化行程摘要；使用者上傳的 RAG 筆記不傳給外部 LLM。
-    public_notes = [item.get("text", "")[:160] for item in facts.get("notes", [])
-                    if item.get("source") == "內建旅遊筆記"]
-    payload = {"model": secret("OPENAI_MODEL", "gpt-4.1-mini"), "max_output_tokens": 250,
-               "instructions": "你是繁體中文旅遊助理。僅依提供事實給三至五句具體建議；必須說明預算差額，不得捏造即時價格、天氣、來源或預訂狀態。",
-               "input": str({"destination": facts["destination"], "days": facts["days"],
-                             "preference": facts["preference"], "spending": facts["spending"],
-                             "hotel": facts.get("hotel"), "external": facts.get("external"),
-                             "public_rag_excerpt": public_notes})}
+        return {"text": fallback, "source": "規則式建議（非 AI）", "status": "unconfigured"}
+    # 使用者上傳的個人筆記不送往外部模型；所有未知價格保留為 null。
+    payload = {"model": secret("OPENAI_MODEL", "gpt-4.1-mini"), "max_output_tokens": 350,
+               "store": False,
+               "instructions": "你是繁體中文旅遊助理。只依提供資料提出三至五項可執行建議。"
+                               "地點名稱不代表開放或可訂。null 表示費用未知，絕不可當零元，"
+                               "也不能宣稱完整總額或預算充足。不得捏造門票、房價、交通或評論。",
+               "input": json.dumps({"destination": facts["destination"], "days": facts["days"],
+                                    "preference": facts["preference"], "spending": facts["spending"],
+                                    "hotel": facts.get("hotel"), "spots": facts.get("spots"),
+                                    "external": facts.get("external")}, ensure_ascii=False)}
     try:
-        with httpx.Client(timeout=12) as client:
+        with httpx.Client(timeout=20) as client:
             response = client.post("https://api.openai.com/v1/responses", json=payload,
                                    headers={"Authorization": f"Bearer {key}"})
             response.raise_for_status()
             data = response.json()
         parts = [part.get("text", "") for item in data.get("output", [])
                  for part in item.get("content", []) if part.get("type") == "output_text"]
-        text = "\n".join(parts).strip()
-        if text:
-            return {"text": text, "source": "LLM"}
-    except (httpx.HTTPError, ValueError, KeyError, TypeError):
-        pass
-    return {"text": fallback, "source": "規則式備援（LLM 不可用）"}
+        output = "\n".join(parts).strip()
+        if output:
+            return {"text": output, "source": "OpenAI AI 建議", "status": "connected"}
+        reason = "AI 回傳空白內容"
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        reason = f"{type(exc).__name__}"
+    return {"text": fallback, "source": "規則式備援（AI 呼叫失敗）",
+            "status": "error", "message": f"AI 暫時不可用：{reason}"}

@@ -4,15 +4,28 @@ from uuid import uuid4
 
 from main import app
 from rag.knowledge import chunks, extract, knowledge, session_knowledge
-from services.analytics import demo_destination_records, hotels, spending, sqm_to_ping, summary
+from services.analytics import hotels, spending, sqm_to_ping, summary
 from services import booking, external, llm, location
+from services import places
+from tools.travel_tools import budget_tool
 from services.location import city_search_name, destination_currency, resolve_country_code, split_city_country
 from utils.location import destination_candidates
 
 client = TestClient(app)
 
 
-def test_health_and_plan():
+def _fake_places(destination, preference=""):
+    return {"area": destination, "capital_fallback": False,
+            "hotels": [{"name": "實際測試飯店", "price": None, "currency": None,
+                        "map_url": "https://www.openstreetmap.org/node/1"}],
+            "spots": [{"name": "實際測試景點", "activity": "參觀", "cost_twd_per_person": None,
+                       "fee_note": "待查", "map_url": "https://www.openstreetmap.org/node/2"}]}
+
+
+def test_health_and_plan(monkeypatch):
+    monkeypatch.setattr(places, "places", _fake_places)
+    monkeypatch.setattr(__import__("agents.travel_agent", fromlist=["places"]), "places", _fake_places)
+    monkeypatch.setattr(__import__("tools.travel_tools", fromlist=["places"]), "places", _fake_places)
     assert client.get("/health").json() == {"status": "ok"}
     response = client.post("/api/plan", json={"destination": "台北", "start_date": "2026-10-01",
         "days": 3, "people": 2, "budget_twd": 30000, "preference": "文化"})
@@ -20,12 +33,16 @@ def test_health_and_plan():
     body = response.json()
     assert len(body["itinerary"]) == 3
     assert body["hotels"] and body["plan_id"] > 0
-    assert body["tool_trace"] == ["booking_tool", "hotel_tool", "budget_tool", "rag_tool"]
+    assert body["tool_trace"] == ["booking_tool", "spot_tool", "hotel_tool", "budget_tool", "rag_tool"]
+    assert body["spending"]["total"] is None
+    assert body["advice"]["status"] == "unconfigured"
     assert body["booking_search_url"].startswith("https://www.booking.com/")
     assert client.get("/api/plans").status_code == 403
 
 
-def test_all_supported_destinations_and_tight_budget_fallback():
+def test_all_supported_destinations_and_tight_budget_fallback(monkeypatch):
+    monkeypatch.setattr(__import__("agents.travel_agent", fromlist=["places"]), "places", _fake_places)
+    monkeypatch.setattr(__import__("tools.travel_tools", fromlist=["places"]), "places", _fake_places)
     for destination in ("台北", "台中", "高雄", "東京", "京都", "大阪", "札幌", "首爾", "釜山", "新加坡"):
         response = client.post("/api/plan", json={"destination": destination,
             "start_date": "2026-10-01", "days": 2, "people": 1,
@@ -34,14 +51,14 @@ def test_all_supported_destinations_and_tight_budget_fallback():
         body = response.json()
         assert body["destination"] == destination
         assert body["hotels"]
-        assert body["hotels"][0]["price"] == min(item["price"] for item in body["hotels"])
+        assert body["hotels"][0]["price"] is None
         assert destination in body["advice"]["text"]
     paris = client.post("/api/plan", json={"destination": "巴黎 法國", "start_date": "2026-10-01",
         "days": 2, "people": 1, "budget_twd": 10000, "preference": "文化"})
     assert paris.status_code == 200
     paris_body = paris.json()
     assert paris_body["hotels"]
-    assert all("非 Booking 即時價" in item["price_source"] for item in paris_body["hotels"])
+    assert all(item["price"] is None for item in paris_body["hotels"])
     assert "ss=%E5%B7%B4%E9%BB%8E+%E6%B3%95%E5%9C%8B" in paris_body["booking_search_url"]
 
 
@@ -53,18 +70,9 @@ def test_analytics_prediction_and_validation():
         "room_size": 25, "stars": 3, "season": 2})
     assert prediction.status_code == 200, prediction.text
     assert prediction.json()["predicted_price_twd"] > 0
-    taipei = client.get("/api/analytics", params={"destination": "台北"}).json()
-    assert taipei["count"] == 40
-    assert taipei["total_count"] == 40
-    assert {item["destination"] for item in taipei["prices"]} == {"台北"}
-    assert all("room_size" in item and "room_size_ping" in item for item in taipei["prices"])
+    assert client.get("/api/analytics").status_code == 404
     assert sqm_to_ping(25) == 7.6
-    booking_fallback = client.get("/api/analytics", params={"destination": "台北",
-        "checkin": "2026-10-01", "checkout": "2026-10-03", "people": 2}).json()
-    assert booking_fallback["booking"]["available"] is False
-    assert booking_fallback["count"] == 40
-    assert "非 Booking 即時價" in booking_fallback["source"]
-    assert booking_fallback["booking"]["search_url"].startswith("https://www.booking.com/")
+    assert client.get("/api/ai/status").status_code == 200
     assert spending(4, 2, 2000, [0, 0, 0, 0], 30000)["components"]["住宿"] == 6000
     assert client.post("/api/plan", json={"destination": " ", "start_date": "2026-10-01",
         "days": 0, "people": 2, "budget_twd": 30000}).status_code == 422
@@ -152,7 +160,7 @@ def test_currency_and_personalized_fallback(monkeypatch):
         "hotel": {"name": "測試旅館", "price": 2000}, "external": {},
         "spending": {"components": {"住宿": 16000, "景點": 3000}, "total": 19000,
                      "remaining": -4000, "daily": 4750, "within_budget": False}})
-    assert "超出預算 4,000 元" in result["text"]
+    assert "超出預算" in result["text"] and "4,000 元" in result["text"]
     assert "測試旅館" in result["text"]
 
 
@@ -162,10 +170,6 @@ def test_destination_data_is_complete():
     assert set(frame["destination"]) == supported
     assert frame.groupby("destination").size().eq(4).all()
     assert set(external.DESTINATION_COORDINATES) == supported
-    custom = demo_destination_records("巴黎 法國", 40)
-    assert len(custom) == 40
-    assert {item["destination"] for item in custom} == {"巴黎 法國"}
-    assert all("非 Booking 即時價" in item["price_source"] for item in custom)
 
 
 def test_booking_official_search_normalization(monkeypatch):
@@ -207,3 +211,25 @@ def test_booking_v32_currency_and_price_normalization(monkeypatch):
     assert result["hotels"][0]["currency"] == "TWD"
     assert result["hotels"][0]["price_total"] == 7200
     assert result["hotels"][0]["price"] == 3600
+
+
+def test_unknown_costs_and_booking_group_price():
+    unknown = budget_tool(3, 2, {"name": "真實旅館", "price": None},
+                          [{"cost_twd_per_person": None}], 30000)
+    assert unknown["total"] is None and unknown["remaining"] is None
+    assert set(unknown["unknown_costs"]) == {"住宿", "景點／活動"}
+    known = budget_tool(3, 4, {"name": "Booking 旅館", "price": 5000},
+                        [{"cost_twd_per_person": 0}], 30000)
+    assert known["components"]["住宿"] == 10000  # API 團體價不再重複乘房間數
+
+
+def test_place_service_is_real_data_only(monkeypatch):
+    monkeypatch.setattr(places, "_search", lambda query: [
+        {"name": "真實旅館", "type": "hotel", "osm_type": "N", "osm_id": 1}
+    ] if query.startswith("hotel") else [
+        {"name": "真實博物館", "type": "museum", "osm_type": "W", "osm_id": 2,
+         "extratags": {"fee": "no"}}])
+    result = places._cached_places("台北", "文化", -1)
+    assert result["hotels"][0]["price"] is None
+    assert result["spots"][0]["cost_twd_per_person"] == 0
+    assert result["spots"][0]["map_url"].endswith("/way/2")

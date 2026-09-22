@@ -102,29 +102,6 @@ def summary_from_records(records: list[dict], source: str) -> dict:
     }
 
 
-def demo_destination_records(destination: str, count: int = 40) -> list[dict]:
-    """建立單一目的地的教學分析樣本，不冒充真實旅館或 Booking 價格。"""
-    base = hotels().reset_index(drop=True)
-    if base.empty or not destination.strip():
-        return []
-    # 以目的地字串產生穩定的調整係數，讓同一輸入每次結果一致。
-    factor = 0.85 + (sum(destination.encode("utf-8")) % 31) / 100
-    output = []
-    for index in range(max(int(count), 0)):
-        source = base.iloc[index % len(base)]
-        room_size = float(source["room_size"])
-        output.append({
-            "name": f"{destination.strip()} 教學住宿 {index + 1:02d}",
-            "destination": destination.strip(), "room_type": source["room_type"],
-            "price": round(float(source["price"]) * factor / 10) * 10,
-            "rating": float(source["rating"]), "distance": float(source["distance"]),
-            "room_size": room_size, "room_size_ping": sqm_to_ping(room_size),
-            "stars": float(source["stars"]), "season": float(source["season"]),
-            "price_source": "TravelMate AI 教學延伸樣本（非 Booking 即時價）",
-        })
-    return output
-
-
 def spending(days: int, people: int, hotel_price: float, spot_costs: list[float], budget: float) -> dict:
     # 住宿按房間估算，假設一間房最多兩人；其他費用按人計。
     rooms = int(np.ceil(people / 2))
