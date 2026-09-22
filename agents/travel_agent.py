@@ -23,6 +23,8 @@ def plan(request: dict) -> dict:
         warnings.append(str(exc))
     if place_data["capital_fallback"]:
         warnings.append(f"「{destination}」是國家；以下地點以首都 {place_data['area']} 周邊代表，並非全國行程。")
+    if place_data.get("area_note"):
+        warnings.append(place_data["area_note"])
     # Booking 查得價格時才可列入預算；OSM 只提供真實名稱。
     priced = [item for item in booking["hotels"] if item.get("price") is not None
               and item.get("currency") == "TWD"]

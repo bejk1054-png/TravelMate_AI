@@ -5,7 +5,7 @@
 ## 目前功能與資料可信度
 
 - 景點：設定 `GOOGLE_PLACES_API_KEY` 並在 Google Cloud 啟用 Places API (New) 及計費後，以 Google Text Search 取得即時星等、評論數和地圖連結。排名使用評論數平滑後的評分、偏好加權，且公園最多兩筆；Google 地點資料不寫入 SQLite、也不轉送 LLM。未設定或查詢失敗時改用沒有 Google 評分的 OpenStreetMap 多種類景點備援，絕不冒稱 Google 評分。[Google Maps 資料使用政策](https://developers.google.com/maps/documentation/places/web-service/policies)另有限制與標示要求。
-- 住宿名稱：使用者搜尋時向 OpenStreetMap 查詢，顯示地圖來源連結；不保證開放、可訂或適合特定日期。公開地點搜尋採一小時快取與每秒至多一次呼叫；若暫時失敗，頁面顯示錯誤，不產生虛構地點。國名輸入以首都周邊代表，並明示範圍。
+- 住宿名稱：使用者搜尋時向 OpenStreetMap 查詢，顯示地圖來源連結；不保證開放、可訂或適合特定日期。公開地點搜尋採一小時快取與每秒至多一次呼叫；若暫時失敗，頁面顯示錯誤，不產生虛構地點。台東等台灣地名會明確加上 Taiwan，避免誤查東京台東區；國名輸入以首都周邊代表，並明示範圍。
 - 景點活動：依地點類型提出「參觀展覽／觀景」等建議；不是已核實的預約活動。門票僅當 OSM 明確標示免門票才列 0 元，其餘待查。
 - 住宿價格：只有設定 Booking.com Demand API 官方 `BOOKING_API_KEY` 和 `BOOKING_AFFILIATE_ID` 後，才可取得最多 40 筆查詢日期房源與價格。沒有憑證時只顯示真實住宿名稱和 Booking 搜尋入口，房價待查。預訂前須核對稅費、房型、可訂性。公開地圖名稱與 Booking 搜尋結果不保證逐筆一致。
 - 預算：餐食每人每日 900 元、當地交通 350 元為明示估算。缺房價或門票時只顯示已知／估算小計，不宣稱完整總額或剩餘預算。Booking 搜尋價為整團房數的每晚價，不再重複乘房數。不含機票及跨城交通。

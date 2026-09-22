@@ -10,6 +10,21 @@ from services.google_places import GooglePlacesError, configured, search_spots
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "TravelMateAI/1.0 (travel planning; https://github.com/bejk1054-png/TravelMate_AI)"
+TAIWAN_AREAS = {
+    "台東": ("Taitung City, Taiwan", "台東市（台灣）"),
+    "臺東": ("Taitung City, Taiwan", "臺東市（台灣）"),
+    "台東市": ("Taitung City, Taiwan", "台東市（台灣）"),
+    "臺東市": ("Taitung City, Taiwan", "臺東市（台灣）"),
+    "台北": ("Taipei, Taiwan", "台北市（台灣）"),
+    "臺北": ("Taipei, Taiwan", "臺北市（台灣）"),
+    "台中": ("Taichung, Taiwan", "台中市（台灣）"),
+    "臺中": ("Taichung, Taiwan", "臺中市（台灣）"),
+    "台南": ("Tainan, Taiwan", "台南市（台灣）"),
+    "臺南": ("Tainan, Taiwan", "臺南市（台灣）"),
+    "高雄": ("Kaohsiung, Taiwan", "高雄市（台灣）"),
+    "花蓮": ("Hualien, Taiwan", "花蓮市（台灣）"),
+    "宜蘭": ("Yilan, Taiwan", "宜蘭市（台灣）"),
+}
 _rate_lock = Lock()
 _last_request = 0.0
 
@@ -45,15 +60,20 @@ def _link(item: dict) -> str:
 @lru_cache(maxsize=64)
 def _cached_places(destination: str, preference: str, hour: int) -> dict:
     city, country = split_city_country(destination)
-    area, capital_fallback = destination, False
-    if not city and country:
+    area, search_area, capital_fallback, area_note = destination, destination, False, None
+    alias = TAIWAN_AREAS.get(city) if country in (None, "TW") else None
+    if alias:
+        search_area, area = alias
+        area_note = f"「{destination}」按{area}周邊搜尋；若要其他鄉鎮請輸入完整地名。"
+    elif not city and country:
         try:
             area = country_capital(country)["name"] + ", " + destination
+            search_area = area
             capital_fallback = True
         except (LocationServiceError, KeyError) as exc:
             raise PlaceServiceError(str(exc)) from exc
     hotels, spots = [], []
-    for item in _search(f"hotel in {area}"):
+    for item in _search(f"hotel in {search_area}"):
         if item.get("type") not in {"hotel", "hostel", "guest_house", "motel"}:
             continue
         name = str(item.get("name") or "").strip()
@@ -67,8 +87,8 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
                    "地標": "landmarks"}.get(preference)
     queries = []
     if search_term:
-        queries.append(f"{search_term} in {area}")
-    queries.append(f"attractions in {area}")
+        queries.append(f"{search_term} in {search_area}")
+    queries.append(f"attractions in {search_area}")
     candidates = []
     for query in queries:
         candidates.extend(_search(query))
@@ -98,6 +118,7 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
                       "map_url": _link(item), "rating": None, "rating_count": None,
                       "rating_source": None})
     return {"hotels": hotels[:10], "spots": spots[:10], "area": area,
+            "search_area": search_area, "area_note": area_note,
             "capital_fallback": capital_fallback}
 
 
@@ -108,7 +129,7 @@ def places(destination: str, preference: str = "") -> dict:
     result["spot_message"] = "未設定 Google Places API 金鑰；目前景點沒有 Google 評分。"
     if configured():
         try:
-            google_spots = search_spots(result["area"], preference)
+            google_spots = search_spots(result.get("search_area", result["area"]), preference)
             if google_spots:
                 result["spots"] = google_spots
                 result["spot_source"] = "Google Maps"

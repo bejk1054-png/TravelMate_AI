@@ -15,6 +15,7 @@ CITY_ALIASES = {
     "馬德里": "Madrid", "里斯本": "Lisbon", "阿姆斯特丹": "Amsterdam",
     "布魯塞爾": "Brussels", "維也納": "Vienna", "布拉格": "Prague", "雅典": "Athens",
     "開羅": "Cairo", "內羅畢": "Nairobi", "開普敦": "Cape Town",
+    "台東": "Taitung", "臺東": "Taitung", "台東市": "Taitung", "臺東市": "Taitung",
     "約翰尼斯堡": "Johannesburg", "里約熱內盧": "Rio de Janeiro",
     "聖保羅": "Sao Paulo", "布宜諾斯艾利斯": "Buenos Aires",
     "墨西哥城": "Mexico City", "溫哥華": "Vancouver", "多倫多": "Toronto",

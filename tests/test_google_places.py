@@ -91,3 +91,16 @@ def test_google_spots_flow_through_plan_without_persistence(tmp_path, monkeypatc
     assert body["spot_source"] == "Google Maps"
     assert body["itinerary"][0]["rating"] == 4.7
     assert "Google 測試博物館" not in str(repository.recent_plans(1))
+
+
+def test_taitung_is_disambiguated_from_tokyo_taito(monkeypatch):
+    queries = []
+    def fake_search(query):
+        queries.append(query)
+        return []
+    monkeypatch.setattr(places, "_search", fake_search)
+    result = places._cached_places("台東", "自然", -100)
+    assert result["search_area"] == "Taitung City, Taiwan"
+    assert result["area_note"]
+    assert all("Taitung City, Taiwan" in query for query in queries)
+    assert not any("parks in 台東" in query for query in queries)
