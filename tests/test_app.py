@@ -1,7 +1,9 @@
 """離線煙霧測試；不依賴即時網路或 LLM 金鑰。"""
 from fastapi.testclient import TestClient
 from uuid import uuid4
+from datetime import date
 
+from agents.travel_agent import _build_itinerary
 from main import app
 from rag.knowledge import chunks, extract, knowledge, session_knowledge
 from services.analytics import hotels, spending, sqm_to_ping, summary
@@ -40,6 +42,29 @@ def test_health_and_plan(monkeypatch):
     assert "reviews" not in body  # 教學評論不可冒稱為真實住宿評論
     assert body["booking_search_url"].startswith("https://www.booking.com/")
     assert client.get("/api/plans").status_code == 403
+
+
+def test_detailed_health_never_exposes_secrets():
+    response = client.get("/health/details")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == "1.0.0"
+    assert set(body["services"]) == {"database", "ai", "booking", "google_places", "rag"}
+    assert "key" not in str(body).lower()
+
+
+def test_itinerary_uses_multiple_real_spots_without_repeating():
+    spots = [{"name": f"景點 {index}", "activity": "參觀", "category": "文化",
+              "cost_twd_per_person": None, "fee_note": "待查",
+              "map_url": f"https://example.com/{index}",
+              "google_maps_url": f"https://maps.google.com/{index}",
+              "latitude": 25.0 + index / 100, "longitude": 121.5 + index / 100,
+              "recommendation_score": 90 - index} for index in range(6)]
+    rows = _build_itinerary(spots, date(2026, 10, 1), 2)
+    assert len(rows) == 6
+    assert len({row["spot"] for row in rows}) == 6
+    assert {row["time"] for row in rows} == {"09:00", "13:30", "17:00"}
+    assert rows[1]["travel_minutes_estimate"] is not None
 
 
 def test_all_supported_destinations_and_tight_budget_fallback(monkeypatch):
@@ -166,6 +191,42 @@ def test_currency_and_personalized_fallback(monkeypatch):
     assert "測試旅館" in result["text"]
 
 
+def test_gemini_is_preferred_when_free_key_is_configured(monkeypatch):
+    def fake_secret(name, default=""):
+        return {"GEMINI_API_KEY": "test-gemini", "GEMINI_MODEL": "gemini-test"}.get(name, default)
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "依預算調整住宿並核對票價。"}]}}]}
+
+    class Client:
+        def __init__(self, timeout):
+            assert timeout == 20
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, url, json, headers):
+            assert "gemini-test:generateContent" in url
+            assert headers["x-goog-api-key"] == "test-gemini"
+            return Response()
+
+    monkeypatch.setattr(llm, "secret", fake_secret)
+    monkeypatch.setattr(llm.httpx, "Client", Client)
+    result = llm.advice({"destination": "台北", "days": 2, "preference": "文化",
+        "hotel": None, "spots": [], "external": {},
+        "spending": {"components": {}, "known_subtotal": 1000, "total": None,
+                     "unknown_costs": ["住宿"], "remaining": None}})
+    assert result["status"] == "connected"
+    assert result["provider"] == "Gemini"
+
+
 def test_destination_data_is_complete():
     supported = {"台北", "台中", "高雄", "東京", "京都", "大阪", "札幌", "首爾", "釜山", "新加坡"}
     frame = hotels()
@@ -235,3 +296,5 @@ def test_place_service_is_real_data_only(monkeypatch):
     assert result["hotels"][0]["price"] is None
     assert result["spots"][0]["cost_twd_per_person"] == 0
     assert result["spots"][0]["map_url"].endswith("/way/2")
+    assert result["spots"][0]["recommendation_score"] > 0
+    assert result["spots"][0]["google_maps_url"].startswith("https://www.google.com/maps/search/")
