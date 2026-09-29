@@ -12,7 +12,7 @@ from pathlib import Path
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 st.set_page_config(page_title="TravelMate AI", page_icon="🧭", layout="wide")
 st.title("🧭 TravelMate AI｜旅遊、住宿與消費決策助理")
-st.caption("有 Google Places 金鑰時依 Google Maps 評分推薦景點；住宿房價須 Booking 官方憑證。未知費用標示待查。")
+st.caption("免費模式使用真實公開地點與 TravelMate 推薦分數；可另開 Google Maps 核對評分、Booking 核對房價。")
 SQM_PER_PING = 3.305785
 if "rag_session_id" not in st.session_state:
     st.session_state["rag_session_id"] = str(uuid4())
@@ -78,7 +78,7 @@ def show_hotel_table(rows: list[dict]) -> None:
 
 with st.sidebar:
     st.subheader("後端狀態")
-    health = request("GET", "/health")
+    health = request("GET", "/health/details") or request("GET", "/health")
     if health:
         st.success("已連線")
     else:
@@ -87,6 +87,9 @@ with st.sidebar:
     ai = request("GET", "/api/ai/status") if health else None
     if ai:
         (st.success if ai["configured"] else st.warning)(ai["message"])
+    if health and health.get("services"):
+        with st.expander("查看服務狀態"):
+            st.json(health["services"])
     st.markdown("[使用條款](https://github.com/bejk1054-png/TravelMate_AI/blob/main/TERMS.md) · "
                 "[隱私說明](https://github.com/bejk1054-png/TravelMate_AI/blob/main/PRIVACY.md)")
 
@@ -130,11 +133,18 @@ with tab_plan:
         if result.get("spot_source") == "Google Maps":
             st.caption("景點名稱與 Google 評分：Google Maps（非住宿來源）。")
         itinerary = pd.DataFrame(result["itinerary"]).rename(columns={
-            "day": "天數", "date": "日期", "spot": "實際景點", "activity": "建議活動",
+            "day": "天數", "date": "日期", "time": "時間", "spot": "實際景點", "activity": "建議活動",
             "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源",
-            "rating": "Google 評分", "rating_count": "評論數"})
+            "google_maps_url": "Google Maps 核對", "rating": "Google 評分", "rating_count": "評論數",
+            "recommendation_score": "TravelMate 推薦分數",
+            "travel_distance_km": "距上一站直線距離（公里）",
+            "travel_minutes_estimate": "移動時間估算（分鐘）", "travel_note": "交通說明"})
         st.dataframe(itinerary, hide_index=True, use_container_width=True,
-                     column_config={"地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看地點")})
+                     column_config={
+                         "地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看來源"),
+                         "Google Maps 核對": st.column_config.LinkColumn(
+                             "Google Maps 核對", display_text="查看評分／路線")})
+        st.caption("移動時間由景點座標與一般市區速度估算，不是即時導航；請以 Google Maps 當下路線為準。")
         left, right = st.columns(2)
         with left:
             st.subheader("住宿推薦")
@@ -149,9 +159,15 @@ with tab_plan:
                 spots_frame = pd.DataFrame(result["spots"]).drop(columns=["attributions"], errors="ignore").rename(columns={
                     "name": "景點", "activity": "建議活動", "category": "類型",
                     "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源",
-                    "rating": "Google 評分", "rating_count": "評論數", "rating_source": "評分來源"})
+                    "google_maps_url": "Google Maps 核對", "rating": "Google 評分",
+                    "rating_count": "評論數", "rating_source": "評分來源",
+                    "recommendation_score": "TravelMate 推薦分數",
+                    "recommendation_basis": "推薦依據"})
                 st.dataframe(spots_frame, hide_index=True, use_container_width=True,
-                             column_config={"地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看地點")})
+                             column_config={
+                                 "地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看來源"),
+                                 "Google Maps 核對": st.column_config.LinkColumn(
+                                     "Google Maps 核對", display_text="查看最新資訊")})
                 if result.get("spot_source") == "Google Maps":
                     providers = {(item.get("provider"), item.get("providerUri"))
                                  for spot in result["spots"] for item in spot.get("attributions", [])
@@ -177,7 +193,7 @@ with tab_plan:
             st.caption(spending["assumptions"])
             st.subheader("AI 建議")
             if result["advice"].get("status") != "connected":
-                st.warning("目前未取得 AI 回覆；以下為非 AI 的規則式建議。請在 Render 設定 OPENAI_API_KEY。")
+                st.warning("目前未取得 AI 回覆；以下為非 AI 規則式建議。可在 Render 設定免費層 GEMINI_API_KEY。")
             st.write(result["advice"]["text"])
             st.caption(result["advice"]["source"])
             if result["advice"].get("message"):
