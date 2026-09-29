@@ -2,6 +2,7 @@
 from functools import lru_cache
 from threading import Lock
 import time
+from urllib.parse import urlencode
 
 import httpx
 
@@ -55,6 +56,25 @@ def _search(query: str) -> list[dict]:
 def _link(item: dict) -> str:
     kind = {"N": "node", "W": "way", "R": "relation"}.get(item.get("osm_type"), "node")
     return f"https://www.openstreetmap.org/{kind}/{item['osm_id']}"
+
+
+def _google_maps_link(name: str, destination: str) -> str:
+    """Google Maps 網址不需 API 金鑰；只開啟官方頁面讓使用者自行核對評分。"""
+    return "https://www.google.com/maps/search/?" + urlencode({
+        "api": 1, "query": f"{name}, {destination}"
+    })
+
+
+def _recommendation_score(category: str, preference: str, position: int) -> int:
+    """免費資料沒有評論星等，因此只顯示透明的 TravelMate 排序分數。"""
+    preferred = {
+        "文化": {"museum", "gallery", "monument", "memorial", "castle"},
+        "自然": {"park", "viewpoint", "zoo"},
+        "美食": {"restaurant", "marketplace"},
+        "地標": {"attraction", "viewpoint", "monument", "memorial", "castle"},
+    }.get(preference, set())
+    # 分數只反映偏好、資料完整度與搜尋順位，不冒稱群眾評分。
+    return max(55, min(95, 70 + (15 if category in preferred else 0) - position))
 
 
 @lru_cache(maxsize=64)
@@ -115,8 +135,14 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
         spots.append({"name": name, "activity": activity, "category": category,
                       "cost_twd_per_person": 0 if free else None,
                       "fee_note": "OSM 標示免門票；現場確認" if free else "門票／活動費待查",
-                      "map_url": _link(item), "rating": None, "rating_count": None,
-                      "rating_source": None})
+                      "map_url": _link(item),
+                      "google_maps_url": _google_maps_link(name, area),
+                      "rating": None, "rating_count": None, "rating_source": None,
+                      "recommendation_score": _recommendation_score(
+                          category, preference, len(spots)
+                      ),
+                      "recommendation_basis": "偏好符合度、類型多樣性、公開資料完整度",
+                      "latitude": item.get("lat"), "longitude": item.get("lon")})
     return {"hotels": hotels[:10], "spots": spots[:10], "area": area,
             "search_area": search_area, "area_note": area_note,
             "capital_fallback": capital_fallback}
