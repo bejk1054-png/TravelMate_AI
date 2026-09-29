@@ -209,6 +209,9 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
                       ),
                       "recommendation_basis": "偏好符合度、類型多樣性、公開資料完整度",
                       "latitude": item.get("lat"), "longitude": item.get("lon")})
+    if service_warnings and not hotels and not spots:
+        # 例外不會被 lru_cache 儲存；免費服務恢復後，下次操作可立即重試。
+        raise PlaceServiceError("OpenStreetMap 暫時忙碌或限流；請稍後重試")
     return {"hotels": hotels[:10], "spots": spots[:10], "area": area,
             "search_area": search_area, "area_note": area_note,
             "capital_fallback": capital_fallback,
