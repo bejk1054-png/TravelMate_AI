@@ -349,3 +349,19 @@ def test_free_place_quality_prefers_verifiable_landmarks():
     queries = places._spot_queries("Nairobi, Kenya", "自然 動物")
     assert "zoos in Nairobi, Kenya" in queries
     assert "museums in Nairobi, Kenya" in queries
+
+
+def test_place_service_keeps_partial_results_when_free_api_is_limited(monkeypatch):
+    """住宿或後續查詢被限流時，不可丟掉先前已取得的真實景點。"""
+    def fake_search(query):
+        if query.startswith("museums"):
+            return [{"name": "可核對博物館", "type": "museum", "osm_type": "N",
+                     "osm_id": 901, "lat": "25.0", "lon": "121.5",
+                     "extratags": {"wikidata": "Q901"}}]
+        raise places.PlaceServiceError("OpenStreetMap 暫時限流")
+
+    monkeypatch.setattr(places, "_search", fake_search)
+    result = places._cached_places("限流測試城市", "文化", -901)
+    assert result["hotels"] == []
+    assert result["spots"][0]["name"] == "可核對博物館"
+    assert result["service_warnings"] == ["OpenStreetMap 暫時限流"]
