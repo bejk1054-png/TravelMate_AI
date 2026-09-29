@@ -1,4 +1,4 @@
-"""OpenAI Responses API；未配置或呼叫失敗時明示狀態，不冒稱 AI 已連線。"""
+"""LLM 整合：優先使用 Gemini 免費層，亦支援 OpenAI；失敗時明示備援。"""
 import json
 
 import httpx
@@ -8,10 +8,17 @@ from utils.config import secret
 
 def ai_status() -> dict:
     """只回報是否配置金鑰，不暴露金鑰內容。"""
-    configured = bool(secret("OPENAI_API_KEY"))
-    return {"configured": configured,
-            "message": "已設定 AI 金鑰；實際連線結果以產生行程後為準。" if configured else
-                       "尚未在 Render 設定 OPENAI_API_KEY；目前只能使用規則式建議。"}
+    providers = []
+    if secret("GEMINI_API_KEY"):
+        providers.append("Gemini")
+    if secret("OPENAI_API_KEY"):
+        providers.append("OpenAI")
+    configured = bool(providers)
+    return {"configured": configured, "providers": providers,
+            "preferred_provider": providers[0] if providers else None,
+            "message": (f"已設定 {'、'.join(providers)}；實際連線結果以產生行程後為準。"
+                        if configured else
+                        "尚未設定 GEMINI_API_KEY 或 OPENAI_API_KEY；目前使用規則式建議。")}
 
 
 def _fallback(facts: dict) -> str:
@@ -39,34 +46,79 @@ def _fallback(facts: dict) -> str:
     return " ".join(parts)
 
 
-def advice(facts: dict) -> dict:
-    fallback = _fallback(facts)
-    key = secret("OPENAI_API_KEY")
-    if not key:
-        return {"text": fallback, "source": "規則式建議（非 AI）", "status": "unconfigured"}
-    # 使用者上傳的個人筆記不送往外部模型；所有未知價格保留為 null。
-    payload = {"model": secret("OPENAI_MODEL", "gpt-4.1-mini"), "max_output_tokens": 350,
-               "store": False,
-               "instructions": "你是繁體中文旅遊助理。只依提供資料提出三至五項可執行建議。"
-                               "地點名稱不代表開放或可訂。null 表示費用未知，絕不可當零元，"
-                               "也不能宣稱完整總額或預算充足。不得捏造門票、房價、交通或評論。",
-               "input": json.dumps({"destination": facts["destination"], "days": facts["days"],
-                                    "preference": facts["preference"], "spending": facts["spending"],
-                                    "hotel": facts.get("hotel"), "spots": facts.get("spots"),
-                                    "external": facts.get("external")}, ensure_ascii=False)}
+def _safe_facts(facts: dict) -> dict:
+    """個人上傳筆記不送第三方模型；只送行程計算需要的非敏感欄位。"""
+    return {"destination": facts["destination"], "days": facts["days"],
+            "preference": facts["preference"], "spending": facts["spending"],
+            "hotel": facts.get("hotel"), "spots": facts.get("spots"),
+            "external": facts.get("external")}
+
+
+def _instruction() -> str:
+    return ("你是繁體中文旅遊助理。只依提供資料提出三至五項可執行建議。"
+            "每項要說明理由，並區分即時資料、公開資料與估算。"
+            "地點名稱不代表開放或可訂。null 表示費用未知，絕不可當零元，"
+            "也不能宣稱完整總額或預算充足。不得捏造門票、房價、交通或評論。")
+
+
+def _gemini_advice(facts: dict, key: str) -> str:
+    model = secret("GEMINI_MODEL", "gemini-3.1-flash-lite")
+    payload = {
+        "systemInstruction": {"parts": [{"text": _instruction()}]},
+        "contents": [{"role": "user", "parts": [{"text": json.dumps(
+            _safe_facts(facts), ensure_ascii=False
+        )}]}],
+        "generationConfig": {"maxOutputTokens": 500, "temperature": 0.3},
+    }
+    try:
+        with httpx.Client(timeout=20) as client:
+            response = client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                json=payload, headers={"x-goog-api-key": key, "Content-Type": "application/json"})
+            response.raise_for_status()
+            data = response.json()
+        return "\n".join(part.get("text", "")
+                         for candidate in data.get("candidates", [])
+                         for part in (candidate.get("content") or {}).get("parts", [])).strip()
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise RuntimeError(type(exc).__name__) from exc
+
+
+def _openai_advice(facts: dict, key: str) -> str:
+    payload = {"model": secret("OPENAI_MODEL", "gpt-4.1-mini"), "max_output_tokens": 500,
+               "store": False, "instructions": _instruction(),
+               "input": json.dumps(_safe_facts(facts), ensure_ascii=False)}
     try:
         with httpx.Client(timeout=20) as client:
             response = client.post("https://api.openai.com/v1/responses", json=payload,
                                    headers={"Authorization": f"Bearer {key}"})
             response.raise_for_status()
             data = response.json()
-        parts = [part.get("text", "") for item in data.get("output", [])
-                 for part in item.get("content", []) if part.get("type") == "output_text"]
-        output = "\n".join(parts).strip()
-        if output:
-            return {"text": output, "source": "OpenAI AI 建議", "status": "connected"}
-        reason = "AI 回傳空白內容"
+        return "\n".join(part.get("text", "") for item in data.get("output", [])
+                         for part in item.get("content", [])
+                         if part.get("type") == "output_text").strip()
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-        reason = f"{type(exc).__name__}"
+        raise RuntimeError(type(exc).__name__) from exc
+
+
+def advice(facts: dict) -> dict:
+    fallback = _fallback(facts)
+    configured = []
+    if secret("GEMINI_API_KEY"):
+        configured.append(("Gemini", _gemini_advice, secret("GEMINI_API_KEY")))
+    if secret("OPENAI_API_KEY"):
+        configured.append(("OpenAI", _openai_advice, secret("OPENAI_API_KEY")))
+    if not configured:
+        return {"text": fallback, "source": "規則式建議（非 AI）", "status": "unconfigured"}
+    errors = []
+    for provider, call, key in configured:
+        try:
+            output = call(facts, key)
+            if output:
+                return {"text": output, "source": f"{provider} AI 建議",
+                        "provider": provider, "status": "connected"}
+            errors.append(f"{provider}：空白回覆")
+        except RuntimeError as exc:
+            errors.append(f"{provider}：{exc}")
     return {"text": fallback, "source": "規則式備援（AI 呼叫失敗）",
-            "status": "error", "message": f"AI 暫時不可用：{reason}"}
+            "status": "error", "message": "AI 暫時不可用（" + "；".join(errors) + "）"}
