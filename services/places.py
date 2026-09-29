@@ -6,7 +6,8 @@ from urllib.parse import urlencode
 
 import httpx
 
-from services.location import LocationServiceError, country_capital, split_city_country
+from services.location import (LocationServiceError, city_search_name, country_capital,
+                               split_city_country)
 from services.google_places import GooglePlacesError, configured, search_spots
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -122,15 +123,22 @@ def _spot_quality(item: dict) -> float:
 def _cached_places(destination: str, preference: str, hour: int) -> dict:
     city, country = split_city_country(destination)
     area, search_area, capital_fallback, area_note = destination, destination, False, None
+    country_reference_kind = None
     alias = TAIWAN_AREAS.get(city) if country in (None, "TW") else None
     if alias:
         search_area, area = alias
         area_note = f"「{destination}」按{area}周邊搜尋；若要其他鄉鎮請輸入完整地名。"
+    elif city and country:
+        # 所有外部服務共用同一個正規化城市與 ISO 國碼，避免同名城市跨國或跨州。
+        search_area = f"{city_search_name(city)}, {country}"
     elif not city and country:
         try:
-            area = country_capital(country)["name"] + ", " + destination
-            search_area = area
-            capital_fallback = True
+            reference = country_capital(country)
+            area = reference["name"] + ", " + destination
+            # 對外部地名服務使用 ISO 國碼，比中文國名更穩定。
+            search_area = reference["name"] + ", " + country
+            country_reference_kind = reference.get("reference_kind", "capital")
+            capital_fallback = country_reference_kind in {"capital", "representative_city"}
         except (LocationServiceError, KeyError) as exc:
             raise PlaceServiceError(str(exc)) from exc
     hotels, spots = [], []
@@ -181,7 +189,8 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
                       "latitude": item.get("lat"), "longitude": item.get("lon")})
     return {"hotels": hotels[:10], "spots": spots[:10], "area": area,
             "search_area": search_area, "area_note": area_note,
-            "capital_fallback": capital_fallback}
+            "capital_fallback": capital_fallback,
+            "country_reference_kind": country_reference_kind}
 
 
 def places(destination: str, preference: str = "") -> dict:

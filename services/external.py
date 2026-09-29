@@ -46,7 +46,10 @@ def weather(destination: str, date: str) -> dict:
     i = dates.index(date)
     location_name = point.get("name", destination)
     if point.get("fallback_to_capital"):
-        location_name += "（以首都代表）"
+        label = "代表城市" if point.get("reference_kind") == "representative_city" else "首都"
+        location_name += f"（以{label}代表）"
+    elif point.get("fallback_to_country_center"):
+        location_name += "（以國家／地區代表座標）"
     return {"available": True, "date": date, "location": location_name,
             "max_c": forecast["temperature_2m_max"][i], "min_c": forecast["temperature_2m_min"][i],
             "rain_probability": forecast["precipitation_probability_max"][i]}
