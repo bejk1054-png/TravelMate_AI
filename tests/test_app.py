@@ -365,3 +365,15 @@ def test_place_service_keeps_partial_results_when_free_api_is_limited(monkeypatc
     assert result["hotels"] == []
     assert result["spots"][0]["name"] == "可核對博物館"
     assert result["service_warnings"] == ["OpenStreetMap 暫時限流"]
+
+
+def test_place_service_does_not_cache_total_rate_limit(monkeypatch):
+    """所有查詢失敗時要拋出可重試錯誤，不能把空資料快取一小時。"""
+    monkeypatch.setattr(places, "_search", lambda query: (_ for _ in ()).throw(
+        places.PlaceServiceError("OpenStreetMap 暫時限流")))
+    try:
+        places._cached_places("全部限流測試", "文化", -902)
+    except places.PlaceServiceError as exc:
+        assert "稍後重試" in str(exc)
+    else:
+        raise AssertionError("全部限流時應保留重試機會")
