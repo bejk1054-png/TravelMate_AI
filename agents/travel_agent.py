@@ -90,8 +90,12 @@ def plan(request: dict) -> dict:
         place_data = {"area": destination, "capital_fallback": False,
                       "spot_source": "unavailable", "spot_message": str(exc)}
         warnings.append(str(exc))
+    reference_kind = place_data.get("country_reference_kind")
     if place_data["capital_fallback"]:
-        warnings.append(f"「{destination}」是國家；以下地點以首都 {place_data['area']} 周邊代表，並非全國行程。")
+        label = "代表城市" if reference_kind == "representative_city" else "首都"
+        warnings.append(f"「{destination}」是國家；以下地點以{label} {place_data['area']} 周邊代表，並非全國行程。")
+    elif reference_kind == "country_center":
+        warnings.append(f"「{destination}」是國家／地區；未取得首都資料，以下以 {place_data['area']} 的公開代表座標搜尋，請再指定城市以提高準確度。")
     if place_data.get("area_note"):
         warnings.append(place_data["area_note"])
     # Booking 查得價格時才可列入預算；OSM 只提供真實名稱。
