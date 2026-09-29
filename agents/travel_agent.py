@@ -1,10 +1,79 @@
 """單一主 Agent：選擇工具並整合具來源的行程，不把未知價格冒充為零。"""
 from datetime import date, timedelta
+from math import asin, ceil, cos, radians, sin, sqrt
 
 from services.llm import advice
 from services.places import PlaceServiceError, places
 from tools.travel_tools import (booking_tool, budget_tool, currency_tool, hotel_tool,
                                 rag_tool, spot_tool, weather_tool)
+
+
+TIME_SLOTS = ("09:00", "13:30", "17:00")
+
+
+def _coordinates(spot: dict) -> tuple[float, float] | None:
+    try:
+        return float(spot["latitude"]), float(spot["longitude"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _distance_km(left: dict, right: dict) -> float | None:
+    """使用公開座標估算兩景點直線距離；不冒充即時道路導航。"""
+    a, b = _coordinates(left), _coordinates(right)
+    if not a or not b:
+        return None
+    lat1, lon1, lat2, lon2 = map(radians, (*a, *b))
+    value = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
+    return round(6371 * 2 * asin(sqrt(value)), 1)
+
+
+def _nearby_order(spots: list[dict]) -> list[dict]:
+    """以最近鄰近似排列；缺座標時保持原本推薦順位。"""
+    if len(spots) < 2 or not _coordinates(spots[0]):
+        return spots
+    remaining, ordered = list(spots[1:]), [spots[0]]
+    while remaining:
+        current = ordered[-1]
+        next_index = min(range(len(remaining)), key=lambda index:
+                         _distance_km(current, remaining[index])
+                         if _distance_km(current, remaining[index]) is not None else 1_000_000 + index)
+        ordered.append(remaining.pop(next_index))
+    return ordered
+
+
+def _build_itinerary(spots: list[dict], start: date, days: int) -> list[dict]:
+    """每天最多三個真實景點；資料不足時明確留白，不重複或捏造地點。"""
+    ordered = _nearby_order(spots)
+    per_day = min(3, max(1, ceil(len(ordered) / days))) if ordered else 1
+    rows, cursor = [], 0
+    for day in range(days):
+        daily = ordered[cursor:cursor + per_day]
+        cursor += len(daily)
+        if not daily:
+            daily = [None]
+        previous = None
+        for slot, spot in zip(TIME_SLOTS, daily):
+            distance = _distance_km(previous, spot) if previous and spot else None
+            travel_minutes = max(15, round(distance / 25 * 60)) if distance is not None else None
+            rows.append({
+                "day": day + 1, "date": (start + timedelta(days=day)).isoformat(),
+                "time": slot, "spot": spot["name"] if spot else "待安排",
+                "activity": spot["activity"] if spot else "目前真實景點資料不足，請調整目的地或偏好",
+                "category": spot.get("category") if spot else None,
+                "cost_twd_per_person": spot["cost_twd_per_person"] if spot else None,
+                "fee_note": spot["fee_note"] if spot else "費用待查",
+                "map_url": spot["map_url"] if spot else None,
+                "google_maps_url": spot.get("google_maps_url") if spot else None,
+                "rating": spot.get("rating") if spot else None,
+                "rating_count": spot.get("rating_count") if spot else None,
+                "recommendation_score": spot.get("recommendation_score") if spot else None,
+                "travel_distance_km": distance, "travel_minutes_estimate": travel_minutes,
+                "travel_note": ("景點間直線距離推估，請以 Google Maps 即時路線為準"
+                                if distance is not None else "首站或缺少座標，未估算移動時間"),
+            })
+            previous = spot
+    return rows
 
 
 def plan(request: dict) -> dict:
@@ -30,19 +99,8 @@ def plan(request: dict) -> dict:
               and item.get("currency") == "TWD"]
     hotels = sorted(priced, key=lambda item: item["price"])[:5] if priced else map_hotels[:5]
     chosen = hotels[0] if hotels else None
-    itinerary = []
     start = date.fromisoformat(request["start_date"])
-    for day in range(days):
-        # 不重複使用同一景點；資料不足時保留空白並明示待規劃。
-        spot = selected_spots[day] if day < len(selected_spots) else None
-        itinerary.append({"day": day + 1, "date": (start + timedelta(days=day)).isoformat(),
-                          "spot": spot["name"] if spot else "待安排",
-                          "activity": spot["activity"] if spot else "當地景點資料不足，請自行查詢",
-                          "cost_twd_per_person": spot["cost_twd_per_person"] if spot else None,
-                          "fee_note": spot["fee_note"] if spot else "費用待查",
-                          "map_url": spot["map_url"] if spot else None,
-                          "rating": spot.get("rating") if spot else None,
-                          "rating_count": spot.get("rating_count") if spot else None})
+    itinerary = _build_itinerary(selected_spots, start, days)
     spending = budget_tool(days, people, chosen, itinerary, budget)
     notes = rag_tool(destination + " " + request["preference"], request.get("session_id"))
     external = {}
