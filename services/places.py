@@ -39,15 +39,25 @@ def _search(query: str) -> list[dict]:
     """同一程序最多每秒一次，結果由上層依目的地快取一小時。"""
     global _last_request
     with _rate_lock:
-        delay = 1.1 - (time.monotonic() - _last_request)
-        if delay > 0:
-            time.sleep(delay)
-        _last_request = time.monotonic()
         try:
             with httpx.Client(timeout=12) as client:
-                response = client.get(NOMINATIM_URL, params={
-                    "q": query, "format": "jsonv2", "limit": 10, "extratags": 1},
-                    headers={"User-Agent": USER_AGENT})
+                response = None
+                for attempt in range(2):
+                    delay = 1.1 - (time.monotonic() - _last_request)
+                    if delay > 0:
+                        time.sleep(delay)
+                    _last_request = time.monotonic()
+                    response = client.get(NOMINATIM_URL, params={
+                        "q": query, "format": "jsonv2", "limit": 10, "extratags": 1},
+                        headers={"User-Agent": USER_AGENT})
+                    if response.status_code not in {429, 502, 503, 504} or attempt == 1:
+                        break
+                    # 免費服務限流時短暫退避；上限避免單一行程等待過久。
+                    try:
+                        retry_after = min(max(float(response.headers.get("Retry-After", 2)), 2), 5)
+                    except (TypeError, ValueError):
+                        retry_after = 2
+                    time.sleep(retry_after)
                 response.raise_for_status()
                 return response.json()
         except (httpx.HTTPError, ValueError, TypeError) as exc:
@@ -141,8 +151,13 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
             capital_fallback = country_reference_kind in {"capital", "representative_city"}
         except (LocationServiceError, KeyError) as exc:
             raise PlaceServiceError(str(exc)) from exc
-    hotels, spots = [], []
-    for item in _search(f"hotel in {search_area}"):
+    hotels, spots, service_warnings = [], [], []
+    try:
+        hotel_rows = _search(f"hotel in {search_area}")
+    except PlaceServiceError as exc:
+        hotel_rows = []
+        service_warnings.append(str(exc))
+    for item in hotel_rows:
         if item.get("type") not in {"hotel", "hostel", "guest_house", "motel"}:
             continue
         name = str(item.get("name") or "").strip()
@@ -154,7 +169,14 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
                        "room_type": "待查", "room_size": None})
     candidates = []
     for query in _spot_queries(search_area, preference):
-        candidates.extend(_search(query))
+        try:
+            candidates.extend(_search(query))
+        except PlaceServiceError as exc:
+            service_warnings.append(str(exc))
+            continue
+        # 已有足夠候選便停止額外查詢，降低免費服務負載與限流風險。
+        if len(candidates) >= 15:
+            break
     candidates.sort(key=_spot_quality, reverse=True)
     category_counts, seen = {}, set()
     for item in candidates:
@@ -190,14 +212,17 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
     return {"hotels": hotels[:10], "spots": spots[:10], "area": area,
             "search_area": search_area, "area_note": area_note,
             "capital_fallback": capital_fallback,
-            "country_reference_kind": country_reference_kind}
+            "country_reference_kind": country_reference_kind,
+            "service_warnings": list(dict.fromkeys(service_warnings))}
 
 
 def places(destination: str, preference: str = "") -> dict:
     destination, preference = destination.strip(), preference.strip()
     result = _cached_places(destination, preference, int(time.time() // 3600)).copy()
     result["spot_source"] = "OpenStreetMap"
-    result["spot_message"] = "未設定 Google Places API 金鑰；目前景點沒有 Google 評分。"
+    result["spot_message"] = ("未設定 Google Places API 金鑰；目前景點沒有 Google 評分。"
+                              if result["spots"] else
+                              "公開地點服務暫時沒有回傳景點；請稍後重試或輸入更完整的城市與國家。")
     if configured():
         try:
             google_spots = search_spots(result.get("search_area", result["area"]), preference)
