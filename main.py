@@ -4,7 +4,7 @@ from uuid import UUID
 
 from agents.travel_agent import plan
 from api.schemas import PlanRequest, PredictRequest
-from database.repository import recent_plans, save_plan
+from database.repository import connect, recent_plans, save_plan
 from models.price_model import predict
 from rag.knowledge import extract, session_knowledge
 from services.llm import ai_status
@@ -16,6 +16,37 @@ app = FastAPI(title="TravelMate AI", version="1.0.0")
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/health/details")
+def health_details():
+    """只回傳服務能力與安全狀態，不呼叫付費 API，也不暴露任何金鑰。"""
+    database_ok = False
+    try:
+        with connect() as connection:
+            connection.execute("SELECT 1").fetchone()
+        database_ok = True
+    except (OSError, RuntimeError):
+        database_ok = False
+    ai = ai_status()
+    return {
+        "status": "ok" if database_ok else "degraded",
+        "version": app.version,
+        "services": {
+            "database": {"status": "ok" if database_ok else "error",
+                         "backend": "SQLite",
+                         "persistent_on_render": bool(secret("DATABASE_PATH")),
+                         "message": ("已設定外部持久化路徑" if secret("DATABASE_PATH") else
+                                     "未設定持久化路徑；Render 重啟後資料可能消失")},
+            "ai": {"status": "configured" if ai["configured"] else "fallback",
+                   "providers": ai.get("providers", [])},
+            "booking": {"status": "configured" if
+                        secret("BOOKING_API_KEY") and secret("BOOKING_AFFILIATE_ID") else "link_only"},
+            "google_places": {"status": "configured" if secret("GOOGLE_PLACES_API_KEY") else
+                              "maps_link_only"},
+            "rag": {"status": "memory_only", "persistent": False},
+        },
+    }
 
 
 @app.post("/api/plan")

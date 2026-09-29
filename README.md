@@ -1,6 +1,6 @@
 # TravelMate AI
 
-旅遊規劃示範站：Streamlit 前端 → FastAPI → 單一主 Agent → 地點／Booking／預算／RAG／天氣／匯率工具 → 可選 OpenAI 建議。前端不直接持有 API 金鑰。
+旅遊規劃站：Streamlit 前端 → FastAPI → 單一主 Agent → 地點／Booking／預算／RAG／天氣／匯率工具 → 可選 Gemini 免費層或 OpenAI 建議。前端不直接持有 API 金鑰。
 
 ## 目前功能與資料可信度
 
@@ -9,7 +9,9 @@
 - 景點活動：依地點類型提出「參觀展覽／觀景」等建議；不是已核實的預約活動。門票僅當 OSM 明確標示免門票才列 0 元，其餘待查。
 - 住宿價格：只有設定 Booking.com Demand API 官方 `BOOKING_API_KEY` 和 `BOOKING_AFFILIATE_ID` 後，才可取得最多 40 筆查詢日期房源與價格。沒有憑證時只顯示真實住宿名稱和 Booking 搜尋入口，房價待查。預訂前須核對稅費、房型、可訂性。公開地圖名稱與 Booking 搜尋結果不保證逐筆一致。
 - 預算：餐食每人每日 900 元、當地交通 350 元為明示估算。缺房價或門票時只顯示已知／估算小計，不宣稱完整總額或剩餘預算。Booking 搜尋價為整團房數的每晚價，不再重複乘房數。不含機票及跨城交通。
-- AI 建議：Render 設定 `OPENAI_API_KEY` 後使用 OpenAI Responses API；行程結果會標明 `connected`。未設定或請求失敗時明示「規則式備援（非 AI）」。私人上傳筆記不送至 OpenAI。
+- AI 建議：Render 設定 `GEMINI_API_KEY` 後優先使用 Gemini；亦可選擇設定 `OPENAI_API_KEY` 作備援。行程結果會標明實際供應者與 `connected`；未設定或請求失敗時明示「規則式備援（非 AI）」。私人上傳筆記不送至外部模型。
+- 免費景點排序：未設定 Google Places 時，以偏好符合度、類型多樣性與公開資料完整度產生 `TravelMate 推薦分數`，並提供免 API Key 的 Google Maps 核對按鈕；此分數絕不冒稱 Google 評分。
+- 每日行程：依可核實景點安排每天最多三站，使用公開座標做鄰近排序與移動時間估算；這不是即時道路導航，畫面會要求以 Google Maps 當下路線為準。
 - 旅遊知識庫：PDF／TXT／CSV 上傳後暫存在後端記憶體，供 RAG 檢索；重啟後消失，請勿上傳敏感資料。
 - 價格模型：以合成教學資料訓練 RandomForest，與真實 Booking 價格完全分離，不能用來查實際房價。
 - NLP 評論分析程式保留作離線教學，但示範評論並非上述真實飯店的住客評論，因此不在即時行程中呈現。
@@ -38,7 +40,7 @@ python -m uvicorn main:app --reload --port 8000
 ## Render + Streamlit Community Cloud
 
 1. 將程式提交至 GitHub。`.env`、資料庫、模型輸出及 `.venv` 不可上傳；`.env.example` 可以上傳。
-2. Render Web Service：Python 3.12，build `pip install -r requirements.txt`，start `uvicorn main:app --host 0.0.0.0 --port $PORT`。本 repo 亦提供 `render.yaml`。在 Render Environment 設 `GOOGLE_PLACES_API_KEY`（Google Cloud 需先啟用 Places API New 與計費），可選 `OPENAI_API_KEY`；若有 Booking 官方合作憑證再設 `BOOKING_API_KEY` 和 `BOOKING_AFFILIATE_ID`。重新部署後用 `/api/ai/status` 檢查 AI `configured`，再產生一次行程確認實際 `connected`。
+2. Render Web Service：Python 3.12，build `pip install -r requirements.txt`，start `uvicorn main:app --host 0.0.0.0 --port $PORT`。本 repo 亦提供 `render.yaml`。零付費 AI 在 Render Environment 設 `GEMINI_API_KEY`；`OPENAI_API_KEY`、`GOOGLE_PLACES_API_KEY` 與 Booking 官方合作憑證皆為可選。重新部署後用 `/health/details` 及 `/api/ai/status` 檢查設定，再產生一次行程確認實際 `connected`。
 3. Streamlit Community Cloud：入口 `frontend/app.py`，Python 3.12；Secrets 設 `TRAVELMATE_API_URL = "https://你的-Render-網址.onrender.com"`。**不要**把後端金鑰放 Streamlit Secrets 或 GitHub。
 4. 部署檢查：`/health` 為 `ok`、`/api/ai/status` 狀態符合設定；台北及肯亞行程可顯示地點來源；未知價格是「待查」；Booking 查價連結有效；知識庫及模型頁可操作。
 
