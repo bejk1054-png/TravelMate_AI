@@ -7,7 +7,8 @@ from utils.config import secret
 
 SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 FIELD_MASK = ("places.id,places.displayName,places.rating,places.userRatingCount,"
-              "places.googleMapsUri,places.primaryType,places.businessStatus,places.attributions")
+              "places.googleMapsUri,places.primaryType,places.businessStatus,places.attributions,"
+              "places.location")
 QUERY_BY_PREFERENCE = {"文化": "museums and historic landmarks", "自然": "nature attractions",
                        "美食": "local food markets", "地標": "landmarks"}
 
@@ -83,7 +84,7 @@ def search_spots(destination: str, preference: str) -> list[dict]:
         ranked.append((score, count, item, category, rating, name))
     ranked.sort(key=lambda row: (-row[0], -row[1], row[5]))
     selected, per_category = [], {}
-    for _score, count, item, category, rating, name in ranked:
+    for score, count, item, category, rating, name in ranked:
         limit = 2 if category == "自然" else 4
         if per_category.get(category, 0) >= limit:
             continue
@@ -92,6 +93,11 @@ def search_spots(destination: str, preference: str) -> list[dict]:
                          "rating": rating, "rating_count": count,
                          "rating_source": "Google Maps", "cost_twd_per_person": None,
                          "fee_note": "門票／活動費待查", "map_url": item.get("googleMapsUri"),
+                         "google_maps_url": item.get("googleMapsUri"),
+                         "recommendation_score": round(score * 20),
+                         "recommendation_basis": "Google 評分、評論數、偏好符合度與類型多樣性",
+                         "latitude": (item.get("location") or {}).get("latitude"),
+                         "longitude": (item.get("location") or {}).get("longitude"),
                          "attributions": item.get("attributions") or []})
         if len(selected) >= 10:
             break
