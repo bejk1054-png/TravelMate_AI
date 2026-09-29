@@ -2,6 +2,7 @@
 from fastapi.testclient import TestClient
 from uuid import uuid4
 from datetime import date
+from babel import Locale
 
 from agents.travel_agent import _build_itinerary
 from main import app
@@ -139,7 +140,7 @@ def test_free_text_destination_geocoding_fallback(monkeypatch):
 
     def fake_location_get(url, params):
         if "geocoding" in url:
-            assert params["name"] == "巴黎"
+            assert params["name"] == "Paris"
             assert params["countryCode"] == "FR"
             return {"results": [{"name": "巴黎", "latitude": 48.86, "longitude": 2.35}]}
         raise AssertionError("城市查詢不應呼叫首都 API")
@@ -154,6 +155,8 @@ def test_free_text_destination_geocoding_fallback(monkeypatch):
     assert result["available"] is True
     assert split_city_country("New York United States") == ("New York", "US")
     assert city_search_name("紐約") == "New York City"
+    assert city_search_name("new york") == "New York City"
+    assert city_search_name("巴黎") == "Paris"
     assert destination_candidates("New York, United States") == [
         "New York United States", "New York"
     ]
@@ -176,6 +179,42 @@ def test_country_only_uses_capital_and_standard_currency(monkeypatch):
     assert resolve_country_code("肯亞") == "KE"
     assert resolve_country_code("肯尼亚") == "KE"
     assert destination_currency("肯亞") == "KES"
+
+
+def test_country_names_codes_and_chinese_compact_input():
+    """CLDR 的繁中、簡中、英文國名都應回到正確 ISO2，不接受不存在的國碼。"""
+    for locale_name in ("zh_Hant", "zh_Hans", "en"):
+        for code, name in Locale.parse(locale_name).territories.items():
+            if code in location._valid_country_codes():
+                assert resolve_country_code(str(name)) == code
+    assert resolve_country_code("ZZ") is None
+    assert resolve_country_code("UK") == "GB"
+    assert resolve_country_code("USA") == "US"
+    assert split_city_country("巴黎法國") == ("巴黎", "FR")
+    assert split_city_country("東京日本") == ("東京", "JP")
+    assert split_city_country("日本東京") == ("東京", "JP")
+    assert split_city_country("United States New York") == ("New York", "US")
+
+
+def test_missing_world_bank_country_uses_safe_reference(monkeypatch):
+    """世界銀行缺資料時，重要目的地用代表城市，其餘可退到公開國家座標。"""
+    location.country_capital.cache_clear()
+    taiwan = location.country_capital("TW")
+    assert taiwan["name"] == "Taipei"
+    assert taiwan["reference_kind"] == "representative_city"
+
+    def fake_get(url, params):
+        if "worldbank" in url:
+            return [{"page": 1}, [{"capitalCity": "", "latitude": "", "longitude": ""}]]
+        return {"results": [{"name": "Example Territory", "feature_code": "PCLI",
+                              "country_code": "AI", "latitude": 18.22,
+                              "longitude": -63.05}]}
+
+    monkeypatch.setattr(location, "_get_json", fake_get)
+    location.country_capital.cache_clear()
+    point = location.country_capital("AI")
+    assert point["reference_kind"] == "country_center"
+    assert point["fallback_to_country_center"] is True
 
 
 def test_currency_and_personalized_fallback(monkeypatch):
