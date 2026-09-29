@@ -98,6 +98,7 @@ def plan(request: dict) -> dict:
         warnings.append(f"「{destination}」是國家／地區；未取得首都資料，以下以 {place_data['area']} 的公開代表座標搜尋，請再指定城市以提高準確度。")
     if place_data.get("area_note"):
         warnings.append(place_data["area_note"])
+    warnings.extend(place_data.get("service_warnings") or [])
     # Booking 查得價格時才可列入預算；OSM 只提供真實名稱。
     priced = [item for item in booking["hotels"] if item.get("price") is not None
               and item.get("currency") == "TWD"]
