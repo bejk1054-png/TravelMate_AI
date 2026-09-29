@@ -67,14 +67,55 @@ def _google_maps_link(name: str, destination: str) -> str:
 
 def _recommendation_score(category: str, preference: str, position: int) -> int:
     """免費資料沒有評論星等，因此只顯示透明的 TravelMate 排序分數。"""
-    preferred = {
+    preferred_by_word = {
         "文化": {"museum", "gallery", "monument", "memorial", "castle"},
         "自然": {"park", "viewpoint", "zoo"},
         "美食": {"restaurant", "marketplace"},
         "地標": {"attraction", "viewpoint", "monument", "memorial", "castle"},
-    }.get(preference, set())
+    }
+    preferred = set().union(*(
+        categories for word, categories in preferred_by_word.items() if word in preference
+    )) if preference else set()
     # 分數只反映偏好、資料完整度與搜尋順位，不冒稱群眾評分。
     return max(55, min(95, 70 + (15 if category in preferred else 0) - position))
+
+
+def _spot_queries(search_area: str, preference: str) -> list[str]:
+    """用明確類型搜尋，避免免費文字搜尋只回傳低品質的一般 attraction。"""
+    terms = []
+    if "自然" in preference or "動物" in preference:
+        terms.extend(("zoos", "parks"))
+    if "文化" in preference:
+        terms.extend(("museums", "monuments"))
+    if "美食" in preference:
+        terms.append("markets")
+    if "地標" in preference:
+        terms.append("monuments")
+    # 博物館通常有較完整的公開資料；一般景點只作最後補充。
+    terms.extend(("museums", "attractions"))
+    return [f"{term} in {search_area}" for term in dict.fromkeys(terms)]
+
+
+def _spot_quality(item: dict) -> float:
+    """以可核對的公開欄位排序，不把這個分數冒稱為使用者評分。"""
+    tags = item.get("extratags") or {}
+    category = str(item.get("type") or "")
+    name = str(item.get("name") or "").strip()
+    type_weight = {
+        "museum": 25, "zoo": 24, "castle": 23, "monument": 22,
+        "memorial": 21, "gallery": 20, "viewpoint": 18, "marketplace": 17,
+        "park": 15, "restaurant": 12, "attraction": 5,
+    }.get(category, 0)
+    verifiable = (35 if tags.get("wikidata") or tags.get("wikipedia") else 0)
+    verifiable += 12 if tags.get("website") else 0
+    verifiable += 6 if tags.get("opening_hours") else 0
+    # 常見誤標名稱只降權，不武斷刪除；資料不足時仍可顯示並要求使用者核對。
+    suspicious = ("hotel", "hostel", "apartment", "residence", "heights", "person")
+    penalty = 45 if any(word in name.casefold() for word in suspicious) else 0
+    if category == "attraction" and not verifiable:
+        penalty += 18
+    importance = float(item.get("importance") or 0)
+    return type_weight + verifiable + importance * 10 - penalty
 
 
 @lru_cache(maxsize=64)
@@ -103,15 +144,10 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
                        "currency": None, "price_source": "房價待查；名稱來自 OpenStreetMap",
                        "booking_url": None, "map_url": _link(item), "rating": None,
                        "room_type": "待查", "room_size": None})
-    search_term = {"文化": "museums", "自然": "parks", "美食": "markets",
-                   "地標": "landmarks"}.get(preference)
-    queries = []
-    if search_term:
-        queries.append(f"{search_term} in {search_area}")
-    queries.append(f"attractions in {search_area}")
     candidates = []
-    for query in queries:
+    for query in _spot_queries(search_area, preference):
         candidates.extend(_search(query))
+    candidates.sort(key=_spot_quality, reverse=True)
     category_counts, seen = {}, set()
     for item in candidates:
         if item.get("type") not in {"attraction", "museum", "gallery", "viewpoint",
