@@ -298,3 +298,15 @@ def test_place_service_is_real_data_only(monkeypatch):
     assert result["spots"][0]["map_url"].endswith("/way/2")
     assert result["spots"][0]["recommendation_score"] > 0
     assert result["spots"][0]["google_maps_url"].startswith("https://www.google.com/maps/search/")
+
+
+def test_free_place_quality_prefers_verifiable_landmarks():
+    """一般 attraction 即使搜尋順位較前，也不能壓過有公開來源的正式景點。"""
+    vague = {"name": "Example Hotel", "type": "attraction", "importance": 0.5,
+             "extratags": {}}
+    museum = {"name": "National Museum", "type": "museum", "importance": -0.03,
+              "extratags": {"wikidata": "Q1", "website": "https://example.org"}}
+    assert places._spot_quality(museum) > places._spot_quality(vague)
+    queries = places._spot_queries("Nairobi, Kenya", "自然 動物")
+    assert "zoos in Nairobi, Kenya" in queries
+    assert "museums in Nairobi, Kenya" in queries
