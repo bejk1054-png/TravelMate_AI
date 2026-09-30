@@ -10,11 +10,27 @@ from rag.knowledge import chunks, extract, knowledge, session_knowledge
 from services.analytics import hotels, spending, sqm_to_ping, summary
 from services import booking, external, llm, location
 from services import places
+from services.places import _belongs_to_area
 from tools.travel_tools import budget_tool
 from services.location import city_search_name, destination_currency, resolve_country_code, split_city_country
 from utils.location import destination_candidates
 
 client = TestClient(app)
+
+
+def test_place_results_must_belong_to_requested_city():
+    assert _belongs_to_area(
+        {"display_name": "Tokyo Station Hotel, Chiyoda, Tokyo, Japan"},
+        "Tokyo, JP",
+    )
+    assert not _belongs_to_area(
+        {"display_name": "Dojima Hotel, Kita Ward, Osaka, Japan"},
+        "Tokyo, JP",
+    )
+    assert _belongs_to_area(
+        {"display_name": "Museum, Manhattan, New York City, United States"},
+        "New York City, US",
+    )
 
 
 def _fake_places(destination, preference=""):
