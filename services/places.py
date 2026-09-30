@@ -48,7 +48,8 @@ def _search(query: str) -> list[dict]:
                         time.sleep(delay)
                     _last_request = time.monotonic()
                     response = client.get(NOMINATIM_URL, params={
-                        "q": query, "format": "jsonv2", "limit": 10, "extratags": 1},
+                        "q": query, "format": "jsonv2", "limit": 10, "extratags": 1,
+                        "accept-language": "en"},
                         headers={"User-Agent": USER_AGENT})
                     if response.status_code not in {429, 502, 503, 504} or attempt == 1:
                         break
@@ -67,6 +68,19 @@ def _search(query: str) -> list[dict]:
 def _link(item: dict) -> str:
     kind = {"N": "node", "W": "way", "R": "relation"}.get(item.get("osm_type"), "node")
     return f"https://www.openstreetmap.org/{kind}/{item['osm_id']}"
+
+
+def _belongs_to_area(item: dict, search_area: str) -> bool:
+    """排除 Nominatim 文字搜尋混入的其他城市結果。"""
+    display_name = str(item.get("display_name") or "").casefold()
+    if not display_name:
+        # 測試替身或舊快取可能沒有 display_name；不因此誤刪資料。
+        return True
+    expected_city = search_area.split(",", 1)[0].strip().casefold()
+    candidates = {expected_city}
+    if expected_city.endswith(" city"):
+        candidates.add(expected_city[:-5].strip())
+    return any(candidate and candidate in display_name for candidate in candidates)
 
 
 def _google_maps_link(name: str, destination: str) -> str:
@@ -158,6 +172,8 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
         hotel_rows = []
         service_warnings.append(str(exc))
     for item in hotel_rows:
+        if not _belongs_to_area(item, search_area):
+            continue
         if item.get("type") not in {"hotel", "hostel", "guest_house", "motel"}:
             continue
         name = str(item.get("name") or "").strip()
@@ -180,6 +196,8 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
     candidates.sort(key=_spot_quality, reverse=True)
     category_counts, seen = {}, set()
     for item in candidates:
+        if not _belongs_to_area(item, search_area):
+            continue
         if item.get("type") not in {"attraction", "museum", "gallery", "viewpoint",
                                      "monument", "park", "memorial", "castle", "zoo",
                                      "restaurant", "marketplace"}:
