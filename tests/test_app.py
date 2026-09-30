@@ -12,7 +12,8 @@ from services import booking, external, llm, location
 from services import places
 from services.places import _belongs_to_area
 from tools.travel_tools import budget_tool
-from services.location import city_search_name, destination_currency, resolve_country_code, split_city_country
+from services.location import (city_search_name, corrected_destination, destination_currency,
+                               resolve_country_code, split_city_country)
 from utils.location import destination_candidates
 
 client = TestClient(app)
@@ -51,7 +52,9 @@ def test_health_and_plan(monkeypatch):
         "days": 3, "people": 2, "budget_twd": 30000, "preference": "文化"})
     assert response.status_code == 200, response.text
     body = response.json()
-    assert len(body["itinerary"]) == 3
+    # 只有一筆可核實景點時只顯示一筆，不用「待安排」湊滿三天。
+    assert len(body["itinerary"]) == 1
+    assert body["itinerary"][0]["spot"] == "實際測試景點"
     assert body["hotels"] and body["plan_id"] > 0
     assert body["tool_trace"] == ["booking_tool", "spot_tool", "hotel_tool", "budget_tool", "rag_tool"]
     assert body["spending"]["total"] is None
@@ -82,6 +85,7 @@ def test_itinerary_uses_multiple_real_spots_without_repeating():
     assert len({row["spot"] for row in rows}) == 6
     assert {row["time"] for row in rows} == {"09:00", "13:30", "17:00"}
     assert rows[1]["travel_minutes_estimate"] is not None
+    assert _build_itinerary([], date(2026, 10, 1), 14) == []
 
 
 def test_all_supported_destinations_and_tight_budget_fallback(monkeypatch):
@@ -173,6 +177,10 @@ def test_free_text_destination_geocoding_fallback(monkeypatch):
     assert city_search_name("紐約") == "New York City"
     assert city_search_name("new york") == "New York City"
     assert city_search_name("巴黎") == "Paris"
+    assert city_search_name("庫斯科") == "Cusco"
+    assert corrected_destination("斯庫科") == (
+        "Cusco, PE", "已將「斯庫科」校正為「庫斯科 Cusco（秘魯）」後查詢。"
+    )
     assert destination_candidates("New York, United States") == [
         "New York United States", "New York"
     ]
@@ -244,6 +252,13 @@ def test_currency_and_personalized_fallback(monkeypatch):
                      "remaining": -4000, "daily": 4750, "within_budget": False}})
     assert "超出預算" in result["text"] and "4,000 元" in result["text"]
     assert "測試旅館" in result["text"]
+
+    no_spot = llm.advice({"destination": "不存在地名", "days": 4, "preference": "自然",
+        "hotel": None, "spots": [], "external": {},
+        "spending": {"components": {}, "known_subtotal": 5000, "total": None,
+                     "unknown_costs": ["住宿", "景點／活動"], "remaining": None}})
+    assert "沒有取得可核實的景點" in no_spot["text"]
+    assert "已列出真實地點" not in no_spot["text"]
 
 
 def test_gemini_is_preferred_when_free_key_is_configured(monkeypatch):
@@ -339,6 +354,8 @@ def test_unknown_costs_and_booking_group_price():
     known = budget_tool(3, 4, {"name": "Booking 旅館", "price": 5000},
                         [{"cost_twd_per_person": 0}], 30000)
     assert known["components"]["住宿"] == 10000  # API 團體價不再重複乘房間數
+    no_spots = budget_tool(3, 2, {"name": "Booking 旅館", "price": 5000}, [], 30000)
+    assert "景點／活動" in no_spots["unknown_costs"]
 
 
 def test_place_service_is_real_data_only(monkeypatch):

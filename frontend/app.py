@@ -107,6 +107,8 @@ with tab_plan:
         live = st.checkbox("取得即時天氣與匯率（需網路）", value=False)
         submitted = st.form_submit_button("產生行程", type="primary")
     if submitted:
+        # 新查詢開始時先移除舊結果；後端失敗不可繼續顯示上一筆行程。
+        st.session_state.pop("plan_result", None)
         result = request("POST", "/api/plan", json={"destination": destination,
             "start_date": start_date.isoformat(), "days": days, "people": people,
             "budget_twd": budget, "preference": preference, "use_live_api": live,
@@ -139,12 +141,15 @@ with tab_plan:
             "recommendation_score": "TravelMate 推薦分數",
             "travel_distance_km": "距上一站直線距離（公里）",
             "travel_minutes_estimate": "移動時間估算（分鐘）", "travel_note": "交通說明"})
-        st.dataframe(itinerary, hide_index=True, use_container_width=True,
-                     column_config={
-                         "地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看來源"),
-                         "Google Maps 核對": st.column_config.LinkColumn(
-                             "Google Maps 核對", display_text="查看評分／路線")})
-        st.caption("移動時間由景點座標與一般市區速度估算，不是即時導航；請以 Google Maps 當下路線為準。")
+        if itinerary.empty:
+            st.error("沒有取得可核實的景點，因此未產生行程；請檢查地名、加上國家後重試，或稍後再試。")
+        else:
+            st.dataframe(itinerary, hide_index=True, use_container_width=True,
+                         column_config={
+                             "地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看來源"),
+                             "Google Maps 核對": st.column_config.LinkColumn(
+                                 "Google Maps 核對", display_text="查看評分／路線")})
+            st.caption("移動時間由景點座標與一般市區速度估算，不是即時導航；請以 Google Maps 當下路線為準。")
         left, right = st.columns(2)
         with left:
             st.subheader("住宿推薦")

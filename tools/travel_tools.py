@@ -47,7 +47,9 @@ def budget_tool(days: int, people: int, hotel: dict | None,
     # Booking 搜尋價格已依全團房數取得，不可再次乘房數。
     known_fees = sum(float(day["cost_twd_per_person"]) * people for day in itinerary
                      if day.get("cost_twd_per_person") is not None)
-    unknown_fees = sum(day.get("cost_twd_per_person") is None for day in itinerary)
+    # 沒有任何景點列代表資料缺失，不能把活動費誤當成 0 元。
+    unknown_fees = (sum(day.get("cost_twd_per_person") is None for day in itinerary)
+                    if itinerary else 1)
     meals, transport = 900 * days * people, 350 * days * people
     subtotal = meals + transport + known_fees + (lodging or 0)
     complete = lodging is not None and unknown_fees == 0

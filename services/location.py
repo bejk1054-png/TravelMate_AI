@@ -25,8 +25,14 @@ CITY_ALIASES = {
     "吉隆坡": "Kuala Lumpur", "雅加達": "Jakarta", "河內": "Hanoi",
     "胡志明市": "Ho Chi Minh City", "馬尼拉": "Manila", "新德里": "New Delhi",
     "孟買": "Mumbai", "杜拜": "Dubai", "迪拜": "Dubai",
+    "庫斯科": "Cusco", "庫司科": "Cusco", "斯庫科": "Cusco",
     # Open-Meteo 搜尋 New York 會誤中 York, Nebraska，必須明確指定 City。
     "New York": "New York City", "Washington DC": "Washington D.C.",
+}
+
+# 只收錄能明確判斷的常見輸入錯置；校正後仍會在畫面顯示提示，避免靜默猜測。
+DESTINATION_CORRECTIONS = {
+    "斯庫科": "Cusco, PE",
 }
 
 # 世界銀行沒有完整收錄下列常見目的地；使用固定且可核對的代表城市座標。
@@ -139,6 +145,15 @@ def city_search_name(city: str) -> str:
     value = city.strip()
     aliases = {name.casefold(): target for name, target in CITY_ALIASES.items()}
     return aliases.get(value.casefold(), value)
+
+
+def corrected_destination(destination: str) -> tuple[str, str | None]:
+    """校正常見且意思明確的地名錯置，並回傳給使用者看的說明。"""
+    value = destination.strip()
+    corrected = DESTINATION_CORRECTIONS.get(value)
+    if not corrected:
+        return value, None
+    return corrected, f"已將「{value}」校正為「庫斯科 Cusco（秘魯）」後查詢。"
 
 
 def territory_currency(country_code: str) -> str | None:

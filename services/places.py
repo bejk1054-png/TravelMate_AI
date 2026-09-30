@@ -155,6 +155,9 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
     elif city and country:
         # 所有外部服務共用同一個正規化城市與 ISO 國碼，避免同名城市跨國或跨州。
         search_area = f"{city_search_name(city)}, {country}"
+    elif city:
+        # 沒附國家時仍先轉換常見中文城市名，避免英文地圖資料無法命中。
+        search_area = city_search_name(city)
     elif not city and country:
         try:
             reference = country_capital(country)

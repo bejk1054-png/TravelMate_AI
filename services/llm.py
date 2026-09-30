@@ -25,7 +25,10 @@ def _fallback(facts: dict) -> str:
     spending = facts["spending"]
     hotel = facts.get("hotel")
     area = facts["destination"]
-    parts = [f"{area} {facts['days']} 日行程：已列出真實地點名稱，但須核對開放時間與交通動線。"]
+    if facts.get("spots"):
+        parts = [f"{area} {facts['days']} 日行程：已列出可核對的地點名稱，但須再確認開放時間與交通動線。"]
+    else:
+        parts = [f"{area}：目前沒有取得可核實的景點，請檢查目的地名稱或稍後重試；未產生景點行程。"]
     if hotel:
         if hotel.get("price") is None:
             parts.append(f"「{hotel['name']}」有地圖資料，但房價待查；請到 Booking 輸入入住日期核價。")
