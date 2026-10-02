@@ -78,7 +78,8 @@ def render_plan(result):
             for day, daily in frame.groupby('day', sort=True):
                 with st.container(border=True):
                     st.markdown(f"### 第 {int(day):02d} 天 · {daily.iloc[0]['date']}")
-                    for row in daily.to_dict('records'):
+                    # 卡片用原始 JSON 保留 None，避免 Pandas 將空費用轉成 NaN。
+                    for row in (item for item in rows if item['day'] == day):
                         a, b = st.columns([4, 1])
                         with a:
                             fee = row.get('cost_twd_per_person')
@@ -89,7 +90,7 @@ def render_plan(result):
                         with b:
                             link('查看地圖', row.get('google_maps_url') or row.get('map_url'))
             covered = {row['day'] for row in rows}
-            st.caption(f'目前取得 {len(rows)} 筆景點安排，涵蓋 {len(covered)} 天；其餘天數請再補充安排。移動時間請核對實際路線。')
+            st.caption(f'目前取得 {len(rows)} 筆景點安排，涵蓋 {len(covered)} 天。未列出的日期需再補充安排；移動時間請核對實際路線。')
             with st.expander('下載行程表'):
                 download = frame[['day', 'date', 'time', 'spot', 'activity', 'cost_twd_per_person', 'fee_note']].rename(columns={
                     'day':'天數','date':'日期','time':'時間','spot':'景點','activity':'活動','cost_twd_per_person':'每人費用（TWD）','fee_note':'費用說明'})
