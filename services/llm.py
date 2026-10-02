@@ -25,7 +25,7 @@ def _fallback(facts: dict) -> str:
     spending = facts["spending"]
     hotel = facts.get("hotel")
     area = facts["destination"]
-    if facts.get("spots"):
+    if facts.get("has_verified_spots", bool(facts.get("spots"))):
         parts = [f"{area} {facts['days']} 日行程：已列出可核對的地點名稱，但須再確認開放時間與交通動線。"]
     else:
         parts = [f"{area}：目前沒有取得可核實的景點，請檢查目的地名稱或稍後重試；未產生景點行程。"]
@@ -40,7 +40,7 @@ def _fallback(facts: dict) -> str:
         missing = "、".join(spending["unknown_costs"])
         parts.append(f"已知與估算支出至少 {spending['known_subtotal']:,.0f} 元；{missing}待查，不能判定是否超過預算。")
     else:
-        parts.append(f"完整估算 {spending['total']:,.0f} 元；"
+        parts.append(f"已列項目估算 {spending['total']:,.0f} 元（不含機票與跨城交通）；"
                      f"{'預算內' if spending['within_budget'] else '超出預算'}，"
                      f"差額 {abs(spending['remaining']):,.0f} 元。")
     weather = (facts.get("external") or {}).get("weather")

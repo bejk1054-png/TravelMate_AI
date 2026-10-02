@@ -1,5 +1,5 @@
 """單一主 Agent：選擇工具並整合具來源的行程，不把未知價格冒充為零。"""
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 from math import asin, ceil, cos, radians, sin, sqrt
 
 from services.llm import advice
@@ -124,6 +124,7 @@ def plan(request: dict) -> dict:
                 external[name] = {"available": False, "message": str(exc)}
     # Google 地點內容只用於即時顯示；不送入第三方 LLM。
     facts = {"destination": destination, "days": days, "preference": request["preference"],
+             "has_verified_spots": bool(selected_spots),
              "spending": spending, "hotel": chosen,
              "spots": [] if place_data["spot_source"] == "Google Maps" else itinerary,
              "external": external, "notes": notes, "booking_available": bool(priced)}
@@ -133,6 +134,9 @@ def plan(request: dict) -> dict:
                if place_data["spot_source"] == "Google Maps" else
                " 景點名稱來自 OpenStreetMap，無 Google 評分；門票與活動費未標示者待查。")
     return {"destination": original_destination, "resolved_destination": destination,
+            "trip": {"start_date": request["start_date"], "days": days, "people": people,
+                     "budget_twd": budget, "preference": request["preference"]},
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "area": place_data["area"], "itinerary": itinerary,
             "hotels": hotels, "spots": selected_spots[:10], "spending": spending,
             "spot_source": place_data["spot_source"], "spot_message": place_data["spot_message"],

@@ -50,6 +50,10 @@ def budget_tool(days: int, people: int, hotel: dict | None,
     # 沒有任何景點列代表資料缺失，不能把活動費誤當成 0 元。
     unknown_fees = (sum(day.get("cost_twd_per_person") is None for day in itinerary)
                     if itinerary else 1)
+    # 任一天沒有景點安排，都不能宣稱全程活動費已完整計算。
+    covered_days = {row.get("day") for row in itinerary if row.get("day") is not None}
+    incomplete_days = bool(covered_days) and not set(range(1, days + 1)).issubset(covered_days)
+    unknown_fees += int(incomplete_days)
     meals, transport = 900 * days * people, 350 * days * people
     subtotal = meals + transport + known_fees + (lodging or 0)
     complete = lodging is not None and unknown_fees == 0

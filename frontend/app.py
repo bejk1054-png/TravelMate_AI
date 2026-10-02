@@ -27,22 +27,38 @@ def api_url():
     return str(configured or os.getenv("TRAVELMATE_API_URL", "http://127.0.0.1:8000")).rstrip("/")
 
 
-def request(method: str, route: str, **kwargs):
+def request(method: str, route: str, quiet: bool = False, timeout: int = 90, **kwargs):
     try:
         # Render 免費服務休眠後重新啟動可能超過 50 秒，避免首個請求過早失敗。
-        with httpx.Client(timeout=90) as client:
+        with httpx.Client(timeout=timeout) as client:
             response = client.request(method, api_url() + route, **kwargs)
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ValueError("回應格式不正確")
+            return data
     except httpx.HTTPStatusError as exc:
         try:
             detail = exc.response.json().get("detail", "未知錯誤")
         except (ValueError, AttributeError):
             detail = exc.response.text[:300]
-        st.error(f"後端回應錯誤 {exc.response.status_code}：{detail}")
-    except (httpx.RequestError, ValueError) as exc:
-        st.error(f"無法連線後端：{exc}。請先啟動 FastAPI 或設定後端網址。")
+        if not quiet:
+            if isinstance(detail, list):
+                st.error("輸入內容未通過檢查，請確認目的地、日期、人數與預算。")
+            else:
+                st.error(f"服務暫時無法完成請求（{exc.response.status_code}）。請稍後重試。")
+    except (httpx.RequestError, ValueError):
+        if not quiet:
+            st.error("服務連線逾時或回應異常。免費服務可能正在啟動，請稍後重新按下查詢。")
     return None
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def service_status(base_url):
+    """短暫快取狀態，避免每次操作都等待免費後端；與結果查詢分開。"""
+    health = request("GET", "/health/details", quiet=True, timeout=10)
+    ai = request("GET", "/api/ai/status", quiet=True, timeout=10) if health else None
+    return health, ai
 
 
 def hotel_table(rows: list[dict]) -> pd.DataFrame:
@@ -79,14 +95,18 @@ def show_hotel_table(rows: list[dict]) -> None:
 with st.sidebar:
     st.subheader("TravelMate AI")
     st.caption("旅遊、住宿與預算，一起規劃。")
-    health = request("GET", "/health/details") or request("GET", "/health")
-    if health:
+    health, ai = service_status(api_url())
+    if health and health.get("status") == "ok":
         st.success("已連線")
+    elif health:
+        st.warning("服務部分異常")
     else:
         st.warning("尚未連線")
-    ai = request("GET", "/api/ai/status") if health else None
     if ai:
-        st.caption("AI 已設定" if ai["configured"] else "目前提供規則式旅遊建議")
+        st.caption("AI 已設定，實際連線以查詢結果為準" if ai.get("configured") else "目前提供規則式旅遊建議")
+    if st.button("重新檢查連線"):
+        service_status.clear()
+        st.rerun()
     if health and health.get("services"):
         with st.expander("查看服務狀態"):
             st.json(health["services"])
@@ -111,22 +131,40 @@ with tab_plan:
     if submitted:
         # 新查詢開始時先移除舊結果；後端失敗不可繼續顯示上一筆行程。
         st.session_state.pop("plan_result", None)
-        with st.spinner("正在搜尋景點與住宿，整理你的旅程…"):
-            result = request("POST", "/api/plan", json={"destination": destination,
-                "start_date": start_date.isoformat(), "days": days, "people": people,
-                "budget_twd": budget, "preference": preference, "use_live_api": live,
-                "session_id": st.session_state["rag_session_id"]})
+        st.session_state.pop("plan_query", None)
+        query = {"destination": destination.strip(), "start_date": start_date.isoformat(),
+                 "days": days, "people": people, "budget_twd": budget,
+                 "preference": preference, "use_live_api": live}
+        result = None
+        if not query['destination']:
+            st.error("請先輸入目的地，例如「台北」或「巴黎 法國」。")
+        else:
+            with st.spinner("正在搜尋景點與住宿，整理你的旅程…"):
+                result = request("POST", "/api/plan", json={**query,
+                    "session_id": st.session_state["rag_session_id"]})
+        # 檢查必要欄位，避免前後端更新不同步造成使用者看到程式錯誤。
+        if result and not {'destination', 'itinerary', 'hotels', 'spots', 'spending',
+                           'advice', 'data_notice', 'tool_trace', 'rag_sources'}.issubset(result):
+            st.error("服務正在更新，回應資料尚未完整。請稍後重新查詢。")
+            result = None
         if result:
             st.session_state["plan_result"] = result
+            st.session_state["plan_query"] = query
     if "plan_result" in st.session_state:
         result = st.session_state["plan_result"]
+        query = st.session_state.get("plan_query", {})
+        if query and any(query.get(k) != v for k, v in {
+            'destination': destination.strip(), 'start_date': start_date.isoformat(),
+            'days': days, 'people': people, 'budget_twd': budget,
+            'preference': preference, 'use_live_api': live}.items()):
+            st.info("下方為上一次查詢結果；請按「開始規劃旅程」套用修改後的條件。")
         render_plan(result)
     else:
         st.markdown('<div class="tm-empty">你的旅程從這裡開始。填好目的地與偏好，即可查看行程、住宿和預算。</div>', unsafe_allow_html=True)
 
 with tab_knowledge:
     st.write("上傳 PDF、TXT、CSV 或個人旅遊筆記，系統會切分內容並建立暫存 RAG 檢索索引。")
-    st.info("加入後請回到「行程規劃」重新產生行程；相關片段會顯示在「查看 Agent 工具與 RAG 來源」。")
+    st.info("加入後請回到「行程規劃」重新產生行程；相關片段會顯示在「相關旅遊筆記與處理資訊」。")
     st.caption("內容只保留在目前後端記憶體，服務重啟後消失；請勿上傳敏感個資。")
     file = st.file_uploader("選擇檔案（最多 5 MB）", type=["pdf", "txt", "csv"])
     if file and st.button("加入知識庫"):

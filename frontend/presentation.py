@@ -1,6 +1,8 @@
 """旅遊網站視覺與結果卡片；只負責顯示後端回傳資料。"""
 from html import escape
 from urllib.parse import urlparse
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
@@ -43,8 +45,14 @@ def safe_text(value):
 
 def link(label, url):
     """只允許一般網頁連結，不把不明 URL 送入頁面。"""
-    if isinstance(url, str) and urlparse(url).scheme in {'http', 'https'}:
-        st.link_button(label, url, use_container_width=True)
+    if isinstance(url, str):
+        try:
+            parsed = urlparse(url)
+            valid = parsed.scheme in {'http', 'https'} and bool(parsed.hostname)
+        except ValueError:
+            valid = False
+        if valid:
+            st.link_button(label, url, use_container_width=True)
 
 
 def card(title, tag, detail, price):
@@ -57,13 +65,23 @@ def render_plan(result):
     """將同一份結果呈現為行程卡、住宿卡及預算摘要，保留來源與未知費用。"""
     spending = result['spending']
     st.subheader(f"你的旅程 · {result.get('area', result['destination'])}")
+    trip = result.get('trip', {})
+    if trip:
+        st.caption(f"{trip['start_date']} 出發 · {trip['days']} 天 · {trip['people']} 人 · 預算 NT$ {trip['budget_twd']:,.0f} · {trip['preference']}")
+    if result.get('generated_at'):
+        updated = datetime.fromisoformat(result['generated_at']).astimezone(ZoneInfo('Asia/Taipei'))
+        st.caption(f"查詢時間：{updated:%Y-%m-%d %H:%M}（台灣時間）；價格與營業狀態請核對來源。")
     cols = st.columns(3)
     cols[0].metric('可核對景點', f"{len(result['spots'])} 個")
     cols[1].metric('住宿選項', f"{len(result['hotels'])} 間")
-    cols[2].metric('完整估算' if spending['total'] is not None else '目前部分估算',
+    cols[2].metric('已列項目估算' if spending['total'] is not None else '目前部分估算',
                    f"NT$ {spending['total'] if spending['total'] is not None else spending['known_subtotal']:,.0f}")
     for warning in result.get('warnings', []):
         st.info(warning)
+    if spending['total'] is None:
+        st.caption('費用尚缺：' + '、'.join(spending['unknown_costs']) + '。目前數字不代表完整旅費。')
+    else:
+        st.caption('估算範圍為住宿、已列活動、餐食與市內交通，不含機票及跨城交通。')
     with st.expander('資料來源與查價狀態'):
         st.write(result['data_notice'])
         st.caption(result.get('spot_message', ''))
@@ -85,12 +103,16 @@ def render_plan(result):
                             fee = row.get('cost_twd_per_person')
                             card(row['spot'], row['time'], row['activity'],
                                  f'每人 NT$ {fee:,.0f}' if fee is not None else '門票／活動費待查')
+                            st.caption(row.get('fee_note') or '費用資料待確認')
                             if row.get('travel_minutes_estimate'):
                                 st.caption(f"至此站移動約 {row['travel_minutes_estimate']} 分鐘（座標估算）")
                         with b:
                             link('查看地圖', row.get('google_maps_url') or row.get('map_url'))
             covered = {row['day'] for row in rows}
-            st.caption(f'目前取得 {len(rows)} 筆景點安排，涵蓋 {len(covered)} 天。未列出的日期需再補充安排；移動時間請核對實際路線。')
+            missing_days = sorted(set(range(1, trip.get('days', max(covered)) + 1)) - covered)
+            if missing_days:
+                st.warning('尚未安排第 ' + '、'.join(map(str, missing_days)) + ' 天；目前景點資料不足，請再補充行程。')
+            st.caption(f'目前取得 {len(rows)} 筆景點安排，涵蓋 {len(covered)} 天；移動時間請核對實際路線。')
             with st.expander('下載行程表'):
                 download = frame[['day', 'date', 'time', 'spot', 'activity', 'cost_twd_per_person', 'fee_note']].rename(columns={
                     'day':'天數','date':'日期','time':'時間','spot':'景點','activity':'活動','cost_twd_per_person':'每人費用（TWD）','fee_note':'費用說明'})
@@ -110,7 +132,10 @@ def render_plan(result):
                     st.caption(f'房間 {size:g} 平方公尺 · 約 {size / 3.305785:.1f} 坪')
                 st.caption(hotel.get('price_source') or '請核對住宿來源')
                 link('查看住宿位置', hotel.get('map_url'))
-                link('前往訂房', hotel.get('booking_url') or result.get('booking_search_url'))
+                hotel_url = hotel.get('booking_url')
+                is_specific = bool(hotel_url and hotel_url != result.get('booking_search_url'))
+                link('查看此住宿訂房頁' if is_specific else '搜尋目的地住宿與房價',
+                     hotel_url or result.get('booking_search_url'))
         link('在 Booking 搜尋更多住宿', result.get('booking_search_url'))
     with spots:
         columns = st.columns(2)
