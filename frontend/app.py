@@ -8,11 +8,11 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 from pathlib import Path
+from presentation import setup_style, render_plan
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-st.set_page_config(page_title="TravelMate AI", page_icon="🧭", layout="wide")
-st.title("🧭 TravelMate AI｜旅遊、住宿與消費決策助理")
-st.caption("免費模式使用真實公開地點與 TravelMate 推薦分數；可另開 Google Maps 核對評分、Booking 核對房價。")
+st.set_page_config(page_title="TravelMate AI · 你的下一趟旅程", page_icon="🧭", layout="wide", initial_sidebar_state="collapsed")
+setup_style()
 SQM_PER_PING = 3.305785
 if "rag_session_id" not in st.session_state:
     st.session_state["rag_session_id"] = str(uuid4())
@@ -77,16 +77,16 @@ def show_hotel_table(rows: list[dict]) -> None:
 
 
 with st.sidebar:
-    st.subheader("後端狀態")
+    st.subheader("TravelMate AI")
+    st.caption("旅遊、住宿與預算，一起規劃。")
     health = request("GET", "/health/details") or request("GET", "/health")
     if health:
         st.success("已連線")
     else:
         st.warning("尚未連線")
-    st.caption(api_url())
     ai = request("GET", "/api/ai/status") if health else None
     if ai:
-        (st.success if ai["configured"] else st.warning)(ai["message"])
+        st.caption("AI 已設定" if ai["configured"] else "目前提供規則式旅遊建議")
     if health and health.get("services"):
         with st.expander("查看服務狀態"):
             st.json(health["services"])
@@ -95,6 +95,8 @@ with st.sidebar:
 
 tab_plan, tab_knowledge, tab_model = st.tabs(["行程規劃", "旅遊知識庫", "價格模型"])
 with tab_plan:
+    st.subheader("想去哪裡走走？")
+    st.caption("輸入城市與國家，讓查詢更準確。")
     with st.form("plan"):
         col1, col2, col3 = st.columns(3)
         destination = col1.text_input("目的地", value="台北", max_chars=80,
@@ -105,122 +107,22 @@ with tab_plan:
         budget = col2.number_input("總預算（新台幣）", min_value=1, max_value=10_000_000, value=30000, step=1000)
         preference = col3.selectbox("旅遊偏好", ["文化", "自然", "美食", "地標"])
         live = st.checkbox("取得即時天氣與匯率（需網路）", value=False)
-        submitted = st.form_submit_button("產生行程", type="primary")
+        submitted = st.form_submit_button("開始規劃旅程", type="primary", use_container_width=True)
     if submitted:
         # 新查詢開始時先移除舊結果；後端失敗不可繼續顯示上一筆行程。
         st.session_state.pop("plan_result", None)
-        result = request("POST", "/api/plan", json={"destination": destination,
-            "start_date": start_date.isoformat(), "days": days, "people": people,
-            "budget_twd": budget, "preference": preference, "use_live_api": live,
-            "session_id": st.session_state["rag_session_id"]})
+        with st.spinner("正在搜尋景點與住宿，整理你的旅程…"):
+            result = request("POST", "/api/plan", json={"destination": destination,
+                "start_date": start_date.isoformat(), "days": days, "people": people,
+                "budget_twd": budget, "preference": preference, "use_live_api": live,
+                "session_id": st.session_state["rag_session_id"]})
         if result:
             st.session_state["plan_result"] = result
     if "plan_result" in st.session_state:
         result = st.session_state["plan_result"]
-        st.info(result["data_notice"])
-        if result.get("spot_source") == "Google Maps":
-            st.caption("景點及評分來源：Google Maps。評分為使用者平均分數；排序兼顧評論數，公園最多兩筆。")
-        else:
-            st.warning(result.get("spot_message", "目前無法取得 Google Maps 評分。"))
-        for warning in result.get("warnings", []):
-            st.warning(warning)
-        booking = result.get("booking", {})
-        if booking.get("available") and booking.get("count", 0) > 0:
-            st.success(booking.get("message", "已取得 Booking 房源"))
-        else:
-            st.warning(booking.get("message", "Booking 即時價格目前不可用"))
-        if result.get("booking_search_url"):
-            st.link_button("前往 Booking.com 查價與訂房", result["booking_search_url"], type="primary")
-        st.subheader("每日行程")
-        if result.get("spot_source") == "Google Maps":
-            st.caption("景點名稱與 Google 評分：Google Maps（非住宿來源）。")
-        itinerary = pd.DataFrame(result["itinerary"]).rename(columns={
-            "day": "天數", "date": "日期", "time": "時間", "spot": "實際景點", "activity": "建議活動",
-            "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源",
-            "google_maps_url": "Google Maps 核對", "rating": "Google 評分", "rating_count": "評論數",
-            "recommendation_score": "TravelMate 推薦分數",
-            "travel_distance_km": "距上一站直線距離（公里）",
-            "travel_minutes_estimate": "移動時間估算（分鐘）", "travel_note": "交通說明"})
-        if itinerary.empty:
-            st.error("沒有取得可核實的景點，因此未產生行程；請檢查地名、加上國家後重試，或稍後再試。")
-        else:
-            st.dataframe(itinerary, hide_index=True, use_container_width=True,
-                         column_config={
-                             "地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看來源"),
-                             "Google Maps 核對": st.column_config.LinkColumn(
-                                 "Google Maps 核對", display_text="查看評分／路線")})
-            st.caption("移動時間由景點座標與一般市區速度估算，不是即時導航；請以 Google Maps 當下路線為準。")
-        left, right = st.columns(2)
-        with left:
-            st.subheader("住宿推薦")
-            if result["hotels"]:
-                show_hotel_table(result["hotels"])
-            else:
-                st.warning("暫時查不到可核實的住宿名稱；請使用 Booking 搜尋連結。")
-            st.subheader("景點推薦")
-            if result["spots"]:
-                if result.get("spot_source") == "Google Maps":
-                    st.caption("景點名稱、星等與評論數：Google Maps；點地圖來源查最新資訊。")
-                spots_frame = pd.DataFrame(result["spots"]).drop(columns=["attributions"], errors="ignore").rename(columns={
-                    "name": "景點", "activity": "建議活動", "category": "類型",
-                    "cost_twd_per_person": "每人費用（TWD）", "fee_note": "費用說明", "map_url": "地圖來源",
-                    "google_maps_url": "Google Maps 核對", "rating": "Google 評分",
-                    "rating_count": "評論數", "rating_source": "評分來源",
-                    "recommendation_score": "TravelMate 推薦分數",
-                    "recommendation_basis": "推薦依據"})
-                st.dataframe(spots_frame, hide_index=True, use_container_width=True,
-                             column_config={
-                                 "地圖來源": st.column_config.LinkColumn("地圖來源", display_text="查看來源"),
-                                 "Google Maps 核對": st.column_config.LinkColumn(
-                                     "Google Maps 核對", display_text="查看最新資訊")})
-                if result.get("spot_source") == "Google Maps":
-                    providers = {(item.get("provider"), item.get("providerUri"))
-                                 for spot in result["spots"] for item in spot.get("attributions", [])
-                                 if item.get("provider")}
-                    for provider, provider_uri in sorted(providers, key=lambda item: (item[0], str(item[1]))):
-                        if provider_uri and provider_uri.startswith("https://"):
-                            st.link_button(f"資料提供者：{provider}", provider_uri)
-                        else:
-                            st.caption(f"資料提供者：{provider}")
-            else:
-                st.warning("暫時查不到可核實的景點資料。")
-        with right:
-            spending = result["spending"]
-            st.subheader("每日預算與消費分析")
-            if spending["total"] is None:
-                st.metric("已知與估算支出（非完整總額）", f"{spending['known_subtotal']:,.0f} TWD 起")
-                st.warning("尚缺「" + "、".join(spending["unknown_costs"]) + "」費用；不能判定剩餘預算。")
-            else:
-                st.metric("每日估算（TWD）", f"{spending['daily']:,.0f}")
-                st.metric("總額 / 剩餘（TWD）", f"{spending['total']:,.0f} / {spending['remaining']:,.0f}")
-            st.bar_chart(pd.Series({key: value for key, value in spending["components"].items()
-                                    if value is not None}, name="TWD"))
-            st.caption(spending["assumptions"])
-            st.subheader("AI 建議")
-            if result["advice"].get("status") != "connected":
-                st.warning("目前未取得 AI 回覆；以下為非 AI 規則式建議。可在 Render 設定免費層 GEMINI_API_KEY。")
-            st.write(result["advice"]["text"])
-            st.caption(result["advice"]["source"])
-            if result["advice"].get("message"):
-                st.caption(result["advice"]["message"])
-            external = result["external"]
-            if external:
-                st.subheader("即時資訊")
-                weather = external.get("weather")
-                if weather and weather.get("available"):
-                    st.write(f"天氣：{weather['date']}，{weather['min_c']}–{weather['max_c']}°C，"
-                             f"最高降雨機率 {weather['rain_probability']}%")
-                elif weather:
-                    st.warning(f"天氣：{weather.get('message', '目前無法取得')}")
-                currency = external.get("currency")
-                if currency and currency.get("rate") is not None:
-                    st.write(f"匯率：1 {currency['base']} ≈ {currency['rate']} {currency['quote']}"
-                             f"（更新：{currency['date']}）")
-                elif currency:
-                    st.warning(f"匯率：{currency.get('message', '目前無法取得')}")
-        with st.expander("查看 Agent 工具與 RAG 來源"):
-            st.write("工具：", " → ".join(result["tool_trace"]))
-            st.json(result["rag_sources"])
+        render_plan(result)
+    else:
+        st.markdown('<div class="tm-empty">你的旅程從這裡開始。填好目的地與偏好，即可查看行程、住宿和預算。</div>', unsafe_allow_html=True)
 
 with tab_knowledge:
     st.write("上傳 PDF、TXT、CSV 或個人旅遊筆記，系統會切分內容並建立暫存 RAG 檢索索引。")
