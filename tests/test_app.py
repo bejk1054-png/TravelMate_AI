@@ -360,10 +360,10 @@ def test_unknown_costs_and_booking_group_price():
 
 def test_place_service_is_real_data_only(monkeypatch):
     monkeypatch.setattr(places, "_search", lambda query: [
-        {"name": "真實旅館", "type": "hotel", "osm_type": "N", "osm_id": 1}
+        {"name": "真實旅館", "type": "hotel", "osm_type": "N", "osm_id": 1, "display_name":"旅館, Taipei, Taiwan"}
     ] if query.startswith("hotel") else [
         {"name": "真實博物館", "type": "museum", "osm_type": "W", "osm_id": 2,
-         "extratags": {"fee": "no"}}])
+         "display_name":"博物館, Taipei, Taiwan", "extratags": {"fee": "no"}}])
     result = places._cached_places("台北", "文化", -1)
     assert result["hotels"][0]["price"] is None
     assert result["spots"][0]["cost_twd_per_person"] == 0
@@ -389,7 +389,7 @@ def test_place_service_keeps_partial_results_when_free_api_is_limited(monkeypatc
     def fake_search(query):
         if query.startswith("museums"):
             return [{"name": "可核對博物館", "type": "museum", "osm_type": "N",
-                     "osm_id": 901, "lat": "25.0", "lon": "121.5",
+                     "osm_id": 901, "lat": "25.0", "lon": "121.5", "display_name":"博物館, 限流測試城市",
                      "extratags": {"wikidata": "Q901"}}]
         raise places.PlaceServiceError("OpenStreetMap 暫時限流")
 

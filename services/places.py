@@ -2,6 +2,7 @@
 from functools import lru_cache
 from threading import Lock
 import time
+import unicodedata
 from urllib.parse import urlencode
 
 import httpx
@@ -48,7 +49,7 @@ def _search(query: str) -> list[dict]:
                         time.sleep(delay)
                     _last_request = time.monotonic()
                     response = client.get(NOMINATIM_URL, params={
-                        "q": query, "format": "jsonv2", "limit": 10, "extratags": 1,
+                        "q": query, "format": "jsonv2", "limit": 10, "extratags": 1, "addressdetails": 1,
                         "accept-language": "en"},
                         headers={"User-Agent": USER_AGENT})
                     if response.status_code not in {429, 502, 503, 504} or attempt == 1:
@@ -74,17 +75,47 @@ def _link(item: dict) -> str:
 
 def _belongs_to_area(item: dict, search_area: str) -> bool:
     """排除 Nominatim 文字搜尋混入的其他城市結果。"""
-    display_name = str(item.get("display_name") or "").casefold()
+    # 國家優先核對，避免 Paris, US 之類同名城市跨國混入。
+    city, expected_country = split_city_country(search_area)
+    address = item.get('address') or {}
+    actual_country = str(address.get('country_code') or '').upper()
+    if expected_country and actual_country and actual_country != expected_country:
+        return False
+    def normalize(value):
+        # São/Sao 等重音拼法視為相同，不採子字串比對。
+        return ''.join(c for c in unicodedata.normalize('NFKD', str(value).casefold())
+                       if not unicodedata.combining(c)).strip()
+    display_name = normalize(item.get("display_name") or "")
     if not display_name:
-        # 測試替身或舊快取可能沒有 display_name；不因此誤刪資料。
-        return True
-    expected_city = search_area.split(",", 1)[0].strip().casefold()
+        return False
+    expected_city = normalize(city or search_area.split(',', 1)[0])
     candidates = {expected_city}
+    if expected_city == 'london' and expected_country == 'GB':
+        candidates.add('greater london')
     if expected_city.endswith(" city"):
         candidates.add(expected_city[:-5].strip())
     # 按地址段比對，避免 Taipei 誤命中 New Taipei 等不同城市。
     address_parts = {part.strip() for part in display_name.split(',')}
+    address_parts.update(normalize(address[key]) for key in ('city','town','municipality','county','state')
+                         if address.get(key))
     return bool(candidates & address_parts)
+
+
+def _unavailable(item: dict) -> bool:
+    """排除明確停用或全時段關閉；不將星期公休誤認成永久休館。"""
+    tags = item.get('extratags') or {}
+    hours = str(tags.get('opening_hours') or '').strip().casefold()
+    return (hours in {'closed', 'off'} or hours.startswith('closed "') or
+            any(str(tags.get(key) or '').casefold() == 'yes'
+                for key in ('disused', 'abandoned', 'demolished')))
+
+
+def _lodging_candidate(item: dict) -> bool:
+    """排除只有酒吧資訊而無住宿佐證的誤標旅館。"""
+    tags = item.get('extratags') or {}
+    bar_only = (tags.get('bar') == 'yes' or tags.get('amenity') in {'pub','bar'})
+    room_evidence = any(tags.get(key) for key in ('rooms','beds','tourism:rooms'))
+    return not _unavailable(item) and not (bar_only and not room_evidence)
 
 
 def _google_maps_link(name: str, destination: str) -> str:
@@ -179,6 +210,8 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
         hotel_rows = []
         service_warnings.append(str(exc))
     for item in hotel_rows:
+        if not _lodging_candidate(item):
+            continue
         if not _belongs_to_area(item, search_area):
             continue
         if item.get("type") not in {"hotel", "hostel", "guest_house", "motel"}:
@@ -187,6 +220,8 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
         if not name or not item.get("osm_id"):
             continue
         hotels.append({"name": name, "destination": destination, "price": None,
+                       "address": item.get('display_name'),
+                       "website": (item.get('extratags') or {}).get('website') or (item.get('extratags') or {}).get('contact:website'),
                        "currency": None, "price_source": "房價待查；名稱來自 OpenStreetMap",
                        "booking_url": None, "map_url": _link(item), "rating": None,
                        "room_type": "待查", "room_size": None})
@@ -203,6 +238,9 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
     candidates.sort(key=_spot_quality, reverse=True)
     category_counts, seen = {}, set()
     for item in candidates:
+        if _unavailable(item):
+            service_warnings.append(f"公開來源標示 {item.get('name', '此景點')} 關閉或停用，未排入行程。")
+            continue
         if not _belongs_to_area(item, search_area):
             continue
         if item.get("type") not in {"attraction", "museum", "gallery", "viewpoint",

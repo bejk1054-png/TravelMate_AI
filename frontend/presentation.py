@@ -126,6 +126,9 @@ def render_plan(result):
                     size = float(hotel['room_size'])
                     st.caption(f'房間 {size:g} 平方公尺 · 約 {size / 3.305785:.1f} 坪')
                 st.caption(hotel.get('price_source') or '請核對住宿來源')
+                if hotel.get('address'):
+                    st.caption(hotel['address'])
+                link('查看住宿來源網站', hotel.get('website'))
                 link('查看住宿位置', hotel.get('map_url'))
                 hotel_url = hotel.get('booking_url')
                 is_specific = bool(hotel_url and hotel_url != result.get('booking_search_url'))
