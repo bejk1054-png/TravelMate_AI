@@ -1,6 +1,8 @@
 """旅遊網站視覺與結果卡片；只負責顯示後端回傳資料。"""
 from html import escape
-from urllib.parse import urlparse
+from pathlib import Path
+from base64 import b64encode
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import pandas as pd
@@ -8,34 +10,13 @@ import streamlit as st
 
 
 def setup_style():
-    """以原生 Streamlit 元件保留鍵盤操作與手機排版。"""
-    st.markdown('''<style>
-    .stApp {background:#f8f7f3;color:#193b43;}
-    .block-container {max-width:1180px;padding-top:2.4rem;padding-bottom:3rem;}
-    h1,h2,h3 {letter-spacing:-.025em;color:#193b43;}
-    [data-testid="stSidebar"] {background:#ecefe9;}
-    [data-testid="stForm"], [data-testid="stVerticalBlockBorderWrapper"] {border-radius:18px;}
-    [data-testid="stForm"] {background:white;padding:24px;border:1px solid #dce4df;}
-    .stButton button[kind="primary"], .stFormSubmitButton button[kind="primary"] {background:#126c66;border-color:#126c66;border-radius:10px;}
-    .stTabs [data-baseweb="tab-list"] {gap:24px;margin-bottom:18px;}
-    .stTabs [aria-selected="true"] {color:#126c66;}
-    .tm-hero {background:#193b43;border-radius:24px;padding:38px 40px;margin-bottom:28px;color:#fff;position:relative;overflow:hidden;}
-    .tm-hero:after {content:'↗';position:absolute;right:35px;top:0;color:#8fc6b3;font-size:160px;opacity:.25;}
-    .tm-hero h1 {color:#fff!important;font-size:clamp(30px,4vw,48px);line-height:1.2;max-width:700px;margin:14px 0;}
-    .tm-hero p {color:#d3e3df;max-width:650px;line-height:1.8;margin:0;}
-    .tm-eyebrow {font-size:12px;letter-spacing:.16em;color:#a8d7c5;font-weight:700;}
-    .tm-card {padding:8px 0 12px;}
-    .tm-card h3 {font-size:21px;margin:8px 0;overflow-wrap:anywhere;}
-    .tm-tag {display:inline-block;background:#e8f2ed;color:#126c66;padding:5px 10px;border-radius:7px;font-size:12px;}
-    .tm-muted {color:#667e80;font-size:14px;line-height:1.7;}
-    .tm-price {font-size:22px;font-weight:650;color:#193b43;}
-    .tm-empty {padding:30px;border:1px dashed #b7cbc2;border-radius:18px;background:#eef3ee;color:#48615e;}
-    [data-testid="stMetric"] {background:white;border:1px solid #dde5df;border-radius:16px;padding:18px;}
-    @media(max-width:640px){.block-container{padding-top:1.3rem;}.tm-hero{padding:26px 22px;}.tm-hero:after{right:8px;font-size:110px;}}
-    </style>''', unsafe_allow_html=True)
-    st.markdown('''<div class="tm-hero"><span class="tm-eyebrow">TRAVELMATE AI · YOUR NEXT JOURNEY</span>
-    <h1>下一趟旅行，<br>從你的期待開始。</h1>
-    <p>找值得去的地方、挑適合的住宿，把行程與預算放在一起考慮。<br>輸入目的地，開始規劃屬於你的旅程。</p></div>''', unsafe_allow_html=True)
+    """載入專案內的樣式與原創旅行插畫，不依賴外部圖片服務。"""
+    assets = Path(__file__).resolve().parent / 'assets'
+    css = (assets / 'theme.css').read_text(encoding='utf-8')
+    artwork = b64encode((assets / 'journey.svg').read_bytes()).decode('ascii')
+    st.markdown('<style>' + css + '</style>', unsafe_allow_html=True)
+    st.markdown(f'''<div class="tm-brand"><div class="tm-logo">TravelMate<span> / AI</span></div><div class="tm-brand-note">好好計畫，慢慢旅行</div></div>
+<div class="tm-hero"><div><span class="tm-eyebrow">A LITTLE PLAN. A BIG ADVENTURE.</span><h1>把日子留給<br><em>值得期待的風景。</em></h1><p>從一個想去的地方開始，找到心動的景點、適合的住宿，和剛剛好的旅行節奏。</p><div class="tm-tags"><span>景點探索</span><span>住宿查價</span><span>旅費規劃</span></div></div><div class="tm-hero-art"><img src="data:image/svg+xml;base64,{artwork}" alt="山岳、湖泊與蜿蜒步道的原創旅行插畫"/><div class="tm-stamp">TAKE THE SCENIC ROUTE<br>讓旅程，多一點期待。</div></div></div>''', unsafe_allow_html=True)
 
 
 def safe_text(value):
@@ -59,6 +40,19 @@ def card(title, tag, detail, price):
     st.markdown(f'<div class="tm-card"><span class="tm-tag">{safe_text(tag)}</span>'
                 f'<h3>{safe_text(title)}</h3><div class="tm-muted">{safe_text(detail)}</div>'
                 f'<p class="tm-price">{safe_text(price)}</p></div>', unsafe_allow_html=True)
+
+
+def hotel_search_url(base_url, name, area):
+    """沿用入住條件搜尋具名住宿；搜尋結果不等於已確認可訂房源。"""
+    try:
+        parsed = urlparse(base_url or '')
+        if parsed.scheme != 'https' or parsed.hostname not in {'www.booking.com', 'booking.com'}:
+            return None
+        query = parse_qs(parsed.query)
+        query['ss'] = [f'{name}, {area}']
+        return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
+    except ValueError:
+        return None
 
 
 def render_plan(result):
@@ -88,6 +82,7 @@ def render_plan(result):
         st.caption(result.get('booking', {}).get('message', ''))
     overview, hotels, spots, costs = st.tabs(['每日行程', '住宿精選', '探索景點', '預算與建議'])
     with overview:
+        st.caption('以下為行程草案；時段尚未與各景點營業日、預約名額及交通班次核對，出發前請確認。')
         rows = result['itinerary']
         if not rows:
             st.info('目前沒有取得可核實的景點。請確認地名、加上國家後重新查詢。')
@@ -118,7 +113,7 @@ def render_plan(result):
                     'day':'天數','date':'日期','time':'時間','spot':'景點','activity':'活動','cost_twd_per_person':'每人費用（TWD）','fee_note':'費用說明'})
                 st.download_button('下載 CSV', download.to_csv(index=False).encode('utf-8-sig'), 'travelmate-itinerary.csv', 'text/csv')
     with hotels:
-        st.caption('住宿名稱可核對；實際房價與可訂性請以訂房頁為準。')
+        st.caption('地圖收錄不等於目前營業或有空房；Booking 搜尋結果的名稱、地址、日期與總價都須再次核對。')
         if not result['hotels']:
             st.info('目前沒有取得住宿名稱，可直接到 Booking 查價。')
         columns = st.columns(2)
@@ -134,8 +129,11 @@ def render_plan(result):
                 link('查看住宿位置', hotel.get('map_url'))
                 hotel_url = hotel.get('booking_url')
                 is_specific = bool(hotel_url and hotel_url != result.get('booking_search_url'))
-                link('查看此住宿訂房頁' if is_specific else '搜尋目的地住宿與房價',
-                     hotel_url or result.get('booking_search_url'))
+                link('查看此住宿訂房頁' if is_specific else '在 Booking 查詢此住宿',
+                     hotel_url if is_specific else hotel_search_url(result.get('booking_search_url'),
+                         hotel['name'], result.get('area', result['destination'])))
+                if not is_specific:
+                    st.caption('開啟 Booking 後才取得最新搜尋結果；本站尚未確認房價、空房或是否收錄此住宿。')
         link('在 Booking 搜尋更多住宿', result.get('booking_search_url'))
     with spots:
         columns = st.columns(2)
@@ -150,6 +148,9 @@ def render_plan(result):
                 card(spot['name'], categories.get(spot.get('category'), '探索景點'), detail,
                      f'每人 NT$ {fee:,.0f}' if fee is not None else '門票／活動費待查')
                 link('查看景點與路線', spot.get('google_maps_url') or spot.get('map_url'))
+                link('查看景點來源網站', spot.get('website'))
+                st.caption('公開地圖營業時間（可能變動）：' + str(spot['opening_hours'])
+                           if spot.get('opening_hours') else '營業時間尚未確認，請核對官網或地圖。')
                 # Google 提供者標示保留在對應景點，不能隱藏來源。
                 for attribution in spot.get('attributions', []):
                     if attribution.get('provider'):

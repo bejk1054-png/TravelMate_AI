@@ -66,7 +66,9 @@ def _search(query: str) -> list[dict]:
 
 
 def _link(item: dict) -> str:
-    kind = {"N": "node", "W": "way", "R": "relation"}.get(item.get("osm_type"), "node")
+    # Nominatim jsonv2 使用完整名稱，舊資料才使用單字母。
+    kind = {"N": "node", "W": "way", "R": "relation",
+            "node": "node", "way": "way", "relation": "relation"}.get(item.get("osm_type"), "node")
     return f"https://www.openstreetmap.org/{kind}/{item['osm_id']}"
 
 
@@ -211,6 +213,10 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
         seen.add(item["osm_id"])
         tags = item.get("extratags") or {}
         category = item.get("type")
+        # 官方持續休館公告：暫不排入室內參觀，恢復開放後須重新查證再解除。
+        if item.get('osm_type') in {'way', 'W'} and str(item['osm_id']) == '189788192':
+            service_warnings.append('國父紀念館本館有整修休館公告，暫不排入參觀；來源：https://www.yatsen.gov.tw/News_Content2.aspx?n=6680&s=177998（2026-10-03 核對）')
+            continue
         if category_counts.get(category, 0) >= (2 if category == "park" else 4):
             continue
         category_counts[category] = category_counts.get(category, 0) + 1
@@ -223,6 +229,8 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
                       "cost_twd_per_person": 0 if free else None,
                       "fee_note": "OSM 標示免門票；現場確認" if free else "門票／活動費待查",
                       "map_url": _link(item),
+                      "website": tags.get('website') or tags.get('contact:website'),
+                      "opening_hours": tags.get('opening_hours'),
                       "google_maps_url": _google_maps_link(name, area),
                       "rating": None, "rating_count": None, "rating_source": None,
                       "recommendation_score": _recommendation_score(

@@ -1,0 +1,34 @@
+/* 旅行雜誌風格：原生互動元件保持可操作，裝飾不攔截點擊。 */
+.stApp{background:#f7f6f0;color:#243e37}
+.block-container{max-width:1180px;padding-top:2rem;padding-bottom:4rem}
+h1,h2,h3{color:#243e37;letter-spacing:-.025em}
+.tm-brand{display:flex;justify-content:space-between;align-items:center;padding:6px 0 22px;border-bottom:1px solid #dbe1d8;margin-bottom:20px}
+.tm-logo{font-size:23px;font-weight:750;letter-spacing:-1px}.tm-logo span{color:#527564;font-weight:400}
+.tm-brand-note{font-size:12px;letter-spacing:.12em;color:#718077}
+.tm-hero{display:grid;grid-template-columns:1.08fr 1fr;gap:32px;align-items:center;padding:22px 0 28px}
+.tm-eyebrow{font-size:11px;letter-spacing:.18em;color:#7b816c;font-weight:700;display:block;margin-bottom:18px}
+.tm-hero h1{font-size:clamp(32px,4.5vw,56px);line-height:1.28;font-weight:650;margin:0 0 22px;letter-spacing:-.04em}
+.tm-hero h1 em{font-style:normal;color:#537b64}
+.tm-hero p{font-size:15px;line-height:1.9;color:#6a786e;max-width:430px;margin:0}
+.tm-hero-art{position:relative;max-width:470px;justify-self:end;width:100%}
+.tm-hero-art img{width:100%;display:block;max-height:370px;object-fit:contain}
+.tm-stamp{position:absolute;bottom:22px;left:0;background:#fffcf3;border:1px solid #e3dfd1;padding:13px 20px;border-radius:3px;box-shadow:0 10px 30px #294b3710;transform:rotate(-5deg);font-size:12px;color:#5b7162;letter-spacing:.08em}
+.tm-tags{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}.tm-tags span{font-size:12px;border:1px solid #d8e0d5;border-radius:30px;padding:7px 12px;color:#536e5e}
+[data-testid="stSidebar"]{background:#eef1e8}
+[data-testid="stForm"]{background:#fffefa;padding:26px;border:1px solid #dfe4d9;border-radius:18px;box-shadow:0 8px 32px #263f3010}
+[data-testid="stVerticalBlockBorderWrapper"]{border-radius:16px;background:#fffefa}
+.stTabs [data-baseweb="tab-list"]{gap:20px;margin-bottom:16px;border-bottom:1px solid #dce3d8}
+.stTabs [aria-selected="true"]{color:#426954;font-weight:650}
+.stButton button,.stFormSubmitButton button,[data-testid="stLinkButton"] a{border-radius:9px;min-height:44px;transition:box-shadow .15s ease}
+.stButton button:hover,.stFormSubmitButton button:hover,[data-testid="stLinkButton"] a:hover{box-shadow:0 4px 14px #26433315}
+.tm-card{padding:12px 6px}.tm-card h3{font-size:21px;line-height:1.5;margin:12px 0;overflow-wrap:anywhere}
+.tm-tag{display:inline-block;background:#edf2e7;color:#4c6b51;padding:5px 11px;border-radius:5px;font-size:12px;letter-spacing:.03em}
+.tm-muted{color:#728074;font-size:13px;line-height:1.8}.tm-price{font-size:20px;font-weight:650;color:#365744;margin:16px 0 0}
+[data-testid="stMetric"]{background:#fffefa;border:1px solid #dfe4d9;border-radius:14px;padding:20px}
+.tm-empty{padding:28px 30px;border:1px solid #dce3d4;border-radius:14px;background:#eff2e7;color:#52654f;margin-top:20px}
+.tm-empty strong{display:block;font-size:18px;margin-bottom:10px}.tm-empty p{font-size:14px;line-height:1.8;margin:0}
+.tm-footer{font-size:12px;text-align:center;color:#8a9287;border-top:1px solid #dfe4d9;margin-top:48px;padding-top:22px;letter-spacing:.06em}
+@media(max-width:640px){.block-container{padding-top:1rem}.tm-brand{padding-bottom:16px}.tm-brand-note{font-size:10px;letter-spacing:0}.tm-logo{font-size:20px}.tm-hero{grid-template-columns:1fr;gap:18px;padding-top:18px}.tm-hero h1{font-size:35px;margin-bottom:16px}.tm-hero p{font-size:14px}.tm-hero-art{max-width:290px;justify-self:center}.tm-hero-art img{max-height:240px}.tm-stamp{bottom:12px;left:-4px;font-size:10px;padding:10px 14px}.tm-tags{margin-top:16px}.stTabs [data-baseweb="tab-list"]{gap:16px}[data-testid="stForm"]{padding:18px}.tm-empty{padding:22px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+/* 手機頂部保留 Streamlit 工具列高度，避免品牌被遮住。 */
+@media(max-width:640px){.block-container{padding-top:4rem}}

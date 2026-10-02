@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 570" role="img" aria-label="山岳、湖泊與蜿蜒步道的旅行插畫">
+<defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#c7ddd5"/><stop offset="1" stop-color="#f5e7ce"/></linearGradient><linearGradient id="lake" x2="0" y2="1"><stop stop-color="#77b5b1"/><stop offset="1" stop-color="#bfd9ca"/></linearGradient><clipPath id="arch"><path d="M45 570V265a275 275 0 0 1 550 0v305Z"/></clipPath></defs>
+<g clip-path="url(#arch)"><path fill="url(#sky)" d="M0 0h640v570H0z"/><circle cx="442" cy="137" r="52" fill="#e8ae72"/>
+<path d="M-10 345 164 126 276 287 365 195 642 387V570H0" fill="#8da69b"/><path d="m164 126-61 77 48-12 24 23 25-35Z" fill="#f6f1e5"/>
+<path d="M-10 397 142 300 272 353 443 237 660 380V570H0" fill="#527f79"/><path d="m443 237-52 36 48-5 27 27 16-24Z" fill="#dce7dc"/>
+<path d="M-10 425q137-58 274-10t386-9v190H0" fill="url(#lake)"/>
+<path d="M375 426h90m-246 24h182m-70 26h202m-349 31h108" stroke="#eaf1df" stroke-width="3" stroke-linecap="round" opacity=".6"/>
+<path d="M0 411q69-11 130 53t178 106H0Z" fill="#254f4a"/><path d="M640 429q-88-18-145 33t-187 108h332Z" fill="#416c59"/>
+<path d="M80 570q46-54 137-48t12-42q-78-32-96-61" fill="none" stroke="#e7c39c" stroke-width="23"/>
+<g fill="#163d37"><path d="m53 309-36 109h72Z"/><path d="m98 352-29 90h58Z"/><path d="m540 359-35 106h70Z"/><path d="m590 309-43 135h86Z"/></g>
+<path d="M70 395v61m523-11v58m65-90v71" stroke="#163d37" stroke-width="8"/>
+<g transform="translate(221 486)"><circle cy="-24" r="6" fill="#e5ae79"/><path d="m0-17-3 22m1-13 11 10m-12 2-7 17m9-15 8 17" fill="none" stroke="#1c3e39" stroke-width="5" stroke-linecap="round"/><path d="m-7-15-5 17" stroke="#cc754c" stroke-width="10" stroke-linecap="round"/></g>
+<path d="m272 95 13-5 13 5m-47 10 9-4 9 4" fill="none" stroke="#557771" stroke-width="2"/>
+</g><path d="M30 550V265a290 290 0 0 1 580 0v285" fill="none" stroke="#c5d5c8" stroke-width="1"/>
+</svg>

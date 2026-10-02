@@ -53,7 +53,7 @@ def test_card_results_preserve_unknown_prices_and_search_link(frontend):
     assert '每人 NT$ 0' in rendered
     assert any('約 7.6 坪' in c.value for c in frontend.caption)
     assert any('尚未安排第 2' in w.value for w in frontend.warning)
-    assert any('搜尋目的地住宿與房價' in b.label for b in frontend.get('link_button'))
+    assert any('在 Booking 查詢此住宿' in b.label for b in frontend.get('link_button'))
 
 
 def test_empty_results_and_stale_results_cleared_on_blank_input(frontend):
@@ -100,3 +100,80 @@ def test_budget_does_not_claim_complete_when_trip_days_are_missing():
     complete = budget_tool(2, 2, {'price':2000}, [
         {'day':1,'cost_twd_per_person':0}, {'day':2,'cost_twd_per_person':0}], 100000)
     assert complete['total'] == 7000
+
+
+def test_cross_flow_plan_model_failure_retry(frontend, monkeypatch):
+    """行程→模型→另一城市→失敗→重試，確認狀態不交叉污染。"""
+    calls = []
+    def response(self, method, url, **kwargs):
+        calls.append(url)
+        if url.endswith('/api/predict'):
+            body = {'predicted_price_twd': 2200, 'metrics': {'mae': 100, 'rmse': 150}}
+        elif url.endswith('/api/plan'):
+            city = kwargs['json']['destination']
+            if city == '失敗測試':
+                raise httpx.ReadTimeout('測試逾時')
+            body = sample_result()
+            body.update(destination=city, area=city)
+        else:
+            body = {'status': 'ok', 'configured': False}
+        return httpx.Response(200, json=body, request=httpx.Request(method, url))
+    monkeypatch.setattr(httpx.Client, 'request', response)
+    frontend.run(timeout=30)
+    def submit(label):
+        next(b for b in frontend.button if b.label == label).click()
+        frontend.run(timeout=30)
+        assert not frontend.exception
+    submit('開始規劃旅程')
+    session = frontend.session_state['rag_session_id']
+    submit('預測示範價格')
+    assert frontend.session_state['plan_result']['destination'] == '台北'
+    assert any(m.value == '2,200' for m in frontend.metric)
+    for city in ['巴黎 法國', '失敗測試', '奈洛比 肯亞', '台北']:
+        frontend.text_input[0].set_value(city)
+        submit('開始規劃旅程')
+        if city == '失敗測試':
+            assert 'plan_result' not in frontend.session_state
+        else:
+            assert frontend.session_state['plan_result']['destination'] == city
+        assert frontend.session_state['rag_session_id'] == session
+    assert sum(url.endswith('/api/plan') for url in calls) == 5
+
+
+def test_booking_search_preserves_dates_guests_and_exact_name():
+    """網址參數測試，不代表 Booking 已確認庫存或收錄。"""
+    from presentation import hotel_search_url
+    from urllib.parse import parse_qs, urlparse
+    base = 'https://www.booking.com/searchresults.zh-tw.html?ss=Taipei&checkin=2026-12-01&checkout=2026-12-04&group_adults=4&no_rooms=2&selected_currency=TWD'
+    query = parse_qs(urlparse(hotel_search_url(base, 'A & B 旅館', '台北')).query)
+    assert query['ss'] == ['A & B 旅館, 台北']
+    assert query['checkin'] == ['2026-12-01']
+    assert query['checkout'] == ['2026-12-04']
+    assert query['group_adults'] == ['4'] and query['no_rooms'] == ['2']
+    assert hotel_search_url('https://booking.com.evil.test/', 'hotel', 'city') is None
+
+
+@pytest.mark.parametrize('kind,expected', [('N','node'),('W','way'),('R','relation'),('node','node'),('way','way'),('relation','relation')])
+def test_osm_source_links(kind, expected):
+    """地圖物件種類必須與來源一致，不能把建築區域連到同號節點。"""
+    from services.places import _link
+    assert _link({'osm_type':kind,'osm_id':123}) == f'https://www.openstreetmap.org/{expected}/123'
+
+
+def test_known_closed_building_not_scheduled(monkeypatch):
+    """已核對的休館地點不可因地圖仍收錄就加入參觀。"""
+    from services import places
+    places._cached_places.cache_clear()
+    monkeypatch.setattr(places, '_search', lambda query: [
+        {'osm_type':'way','osm_id':189788192,'name':'Sun Yat-sen Memorial Hall',
+         'type':'museum','display_name':'Taipei, Taiwan','extratags':{}},
+        {'osm_type':'way','osm_id':217690234,'name':'Museum of Contemporary Art Taipei',
+         'type':'museum','display_name':'Taipei, Taiwan',
+         'extratags':{'website':'https://www.mocataipei.org.tw/tw'}}])
+    try:
+        result = places._cached_places('台北','文化',0)
+        assert len(result['spots']) == 1
+        assert result['spots'][0]['website'] == 'https://www.mocataipei.org.tw/tw'
+        assert any('休館' in w for w in result['service_warnings'])
+    finally:
+        places._cached_places.cache_clear()
