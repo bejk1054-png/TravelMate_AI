@@ -1,7 +1,8 @@
 """Streamlit 前端：僅以 HTTP 呼叫後端，不直接讀取資料庫與金鑰。"""
 import os
 from uuid import uuid4
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
@@ -121,7 +122,8 @@ with tab_plan:
         col1, col2, col3 = st.columns(3)
         destination = col1.text_input("目的地", value="台北", max_chars=80,
                                       placeholder="例如：台北、巴黎 法國")
-        start_date = col2.date_input("出發日期", value=date.today())
+        # 雲端通常使用 UTC；以台灣日期避免凌晨預設為昨天。
+        start_date = col2.date_input("出發日期", value=datetime.now(ZoneInfo('Asia/Taipei')).date())
         days = col3.number_input("旅遊天數", min_value=1, max_value=14, value=3)
         people = col1.number_input("人數", min_value=1, max_value=20, value=2)
         budget = col2.number_input("總預算（新台幣）", min_value=1, max_value=10_000_000, value=30000, step=1000)
