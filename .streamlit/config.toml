@@ -2,3 +2,12 @@
 # 與 FastAPI 後端的知識庫檔案限制一致，避免前端顯示錯誤的 200 MB 預設值。
 maxUploadSize = 5
 maxMessageSize = 10
+
+[theme]
+# 使用正式主題設定統一按鈕與分頁，減少依賴內部 CSS 元件名稱。
+base = "light"
+primaryColor = "#126c66"
+backgroundColor = "#f8f7f3"
+secondaryBackgroundColor = "#edf2ee"
+textColor = "#193b43"
+font = "sans serif"
