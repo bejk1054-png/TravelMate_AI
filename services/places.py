@@ -82,7 +82,9 @@ def _belongs_to_area(item: dict, search_area: str) -> bool:
     candidates = {expected_city}
     if expected_city.endswith(" city"):
         candidates.add(expected_city[:-5].strip())
-    return any(candidate and candidate in display_name for candidate in candidates)
+    # 按地址段比對，避免 Taipei 誤命中 New Taipei 等不同城市。
+    address_parts = {part.strip() for part in display_name.split(',')}
+    return bool(candidates & address_parts)
 
 
 def _google_maps_link(name: str, destination: str) -> str:
@@ -215,7 +217,7 @@ def _cached_places(destination: str, preference: str, hour: int) -> dict:
         category = item.get("type")
         # 官方持續休館公告：暫不排入室內參觀，恢復開放後須重新查證再解除。
         if item.get('osm_type') in {'way', 'W'} and str(item['osm_id']) == '189788192':
-            service_warnings.append('國父紀念館本館有整修休館公告，暫不排入參觀；來源：https://www.yatsen.gov.tw/News_Content2.aspx?n=6680&s=177998（2026-10-03 核對）')
+            service_warnings.append('國父紀念館本館有整修休館公告，暫不排入參觀；[官方公告](https://www.yatsen.gov.tw/News_Content2.aspx?n=6680&s=177998)（2026-10-03 核對）')
             continue
         if category_counts.get(category, 0) >= (2 if category == "park" else 4):
             continue

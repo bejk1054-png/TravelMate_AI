@@ -153,6 +153,13 @@ def test_booking_search_preserves_dates_guests_and_exact_name():
     assert hotel_search_url('https://booking.com.evil.test/', 'hotel', 'city') is None
 
 
+def test_taipei_does_not_match_new_taipei():
+    """同名字串不代表同一行政區。"""
+    from services.places import _belongs_to_area
+    assert not _belongs_to_area({'display_name':'Temple, Banqiao, New Taipei, Taiwan'}, 'Taipei, Taiwan')
+    assert _belongs_to_area({'display_name':'Museum, Taipei, Taiwan'}, 'Taipei, Taiwan')
+
+
 @pytest.mark.parametrize('kind,expected', [('N','node'),('W','way'),('R','relation'),('node','node'),('way','way'),('relation','relation')])
 def test_osm_source_links(kind, expected):
     """地圖物件種類必須與來源一致，不能把建築區域連到同號節點。"""
